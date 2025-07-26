@@ -10,15 +10,18 @@ documentation = "https://github.com/lawrennd/the-inaccessible-game"
 packages = [{include = "mepp.py"}, {include = "__init__.py"}]
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.9"
 numpy = "^1.20.0"
 matplotlib = "^3.5.0"
 scipy = "^1.8.0"
 tqdm = "^4.60.0"
+quimb = "^1.11.1"
 
 [tool.poetry.group.dev.dependencies]
 jupyter = "^1.0.0"
-ipykernel = "^6.0.0"
+ipywidgets = "^8.0.0"
+notebook = "^7.0.0"
+jupyterlab = "^4.0.0"
 
 [build-system]
 requires = ["poetry-core"]

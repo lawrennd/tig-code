@@ -2,20 +2,35 @@
 GENERIC Decomposition for Three Binary Variables
 =================================================
 
-Computational demonstration of GENERIC structure emergence in information dynamics
-for exponential family with marginal entropy constraints.
+Function library for computational demonstration of GENERIC structure emergence
+in constrained information dynamics for exponential family distributions.
 
 This code accompanies the paper "The Inaccessible Game" and demonstrates
 how constraint geometry creates antisymmetric (conservative) flow alongside
 symmetric (dissipative) dynamics.
 
-Usage:
-    python generic_decomposition_n3.py
+Main Functions:
+    solve_constrained_maxent() - Gradient descent to solve constrained max ent
+    solve_unconstrained_maxent() - Gradient descent for pure max ent (no constraint)
+    analyze_generic_structure() - Compute M = S + A decomposition at a point
+    analyze_correlation_structure() - Analyze frustration patterns
+    plot_phase_space_decomposition() - Visualize linearized dynamics
+    plot_correlation_analysis() - Visualize correlation structure
+    plot_constrained_trajectory() - Visualize gradient descent trajectory
+    plot_constrained_vs_unconstrained() - Compare constrained vs unconstrained flows
 
-Output:
-    - Console output showing decomposition analysis
-    - Figure: generic_n3_phase_space.pdf (phase space trajectories)
-    - Figure: generic_n3_correlation_structure.pdf (correlation analysis)
+Usage:
+    This is a function library. Main execution and demonstrations are in
+    accompanying Jupyter notebooks. For standalone use:
+    
+    >>> import generic_decomposition_n3 as gd
+    >>> # Solve from initial condition
+    >>> solution = gd.solve_constrained_maxent(theta_init, N=3, verbose=True)
+    >>> # Analyze final point
+    >>> result = gd.analyze_generic_structure(solution['trajectory'][-1], N=3)
+    >>> # Generate figures
+    >>> gd.plot_constrained_trajectory(solution, theta_final)
+    >>> gd.plot_phase_space_decomposition(result)
 
 Dependencies:
     numpy, scipy, matplotlib
@@ -26,6 +41,7 @@ Date: October 2025
 
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from scipy.linalg import expm
 from itertools import product
 
@@ -154,7 +170,8 @@ def analyze_generic_structure(theta, N, eps_diff=1e-5):
     
     # Lagrange multiplier from tangency condition
     F_unc = -G @ theta  # Unconstrained flow
-    nu = -np.dot(F_unc, a) / np.dot(a, a)
+    # Tangency: a^T F = 0 => ν = (a^T F_unc)/(a^T a)
+    nu = np.dot(F_unc, a) / np.dot(a, a)
     F = F_unc - nu * a  # Constrained flow
     
     # Linearization: M = ∂F/∂θ (numerical Jacobian)
@@ -166,7 +183,7 @@ def analyze_generic_structure(theta, N, eps_diff=1e-5):
         G_plus = compute_fisher(theta_plus, N)
         a_plus = compute_constraint_gradient(theta_plus, N)
         F_unc_plus = -G_plus @ theta_plus
-        nu_plus = -np.dot(F_unc_plus, a_plus) / np.dot(a_plus, a_plus)
+        nu_plus = np.dot(F_unc_plus, a_plus) / np.dot(a_plus, a_plus)
         F_plus = F_unc_plus - nu_plus * a_plus
         
         M[:, i] = (F_plus - F) / eps_diff
@@ -199,6 +216,108 @@ def analyze_generic_structure(theta, N, eps_diff=1e-5):
         'nu': nu,
         'G': G,
         'a': a,
+    }
+
+
+def solve_constrained_maxent(theta_init, N, n_steps=2000, dt=0.01, 
+                              convergence_tol=1e-6, verbose=False):
+    """
+    Solve constrained max ent dynamics via gradient descent.
+    
+    Dynamics: dθ/dt = F(θ) = -G(θ)θ - ν(θ)a(θ)
+    
+    This performs gradient ascent on joint entropy H(X₁,...,Xₙ) subject to
+    the constraint Σᵢ H(Xᵢ) = C (enforced via Lagrange multiplier ν).
+    
+    Parameters
+    ----------
+    theta_init : array
+        Initial parameter values
+    N : int
+        Number of binary variables
+    n_steps : int
+        Maximum number of gradient steps
+    dt : float
+        Step size for gradient descent
+    convergence_tol : float
+        Stop when ||F|| < convergence_tol
+    verbose : bool
+        Print progress information
+        
+    Returns
+    -------
+    dict with keys:
+        trajectory : array of shape (n_actual_steps, d)
+            Parameter trajectory θ(t)
+        flow_norms : array
+            ||F(θ)|| at each step
+        constraint_values : array
+            Σᵢ H(Xᵢ) at each step (should be approximately constant)
+        converged : bool
+            Whether convergence criterion was met
+    """
+    d = N + N*(N-1)//2
+    trajectory = [theta_init.copy()]
+    flow_norms = []
+    constraint_values = []
+    theta = theta_init.copy()
+    
+    # Initial constraint value
+    marginals, _ = compute_marginals(theta, N)
+    C_init = sum(marginal_entropy(m) for m in marginals)
+    
+    for step in range(n_steps):
+        # Compute constrained flow at current point
+        G = compute_fisher(theta, N)
+        a = compute_constraint_gradient(theta, N)
+        F_unc = -G @ theta  # Unconstrained: maximize entropy
+        
+        # Lagrange multiplier to enforce constraint tangency
+        # Tangency: a^T F = 0 => a^T(F_unc - ν*a) = 0 => ν = (a^T F_unc)/(a^T a)
+        nu = np.dot(F_unc, a) / np.dot(a, a)
+        F = F_unc - nu * a  # Constrained flow
+        
+        # Gradient descent step
+        theta = theta + dt * F
+        
+        # Track metrics
+        flow_norm = np.linalg.norm(F)
+        flow_norms.append(flow_norm)
+        trajectory.append(theta.copy())
+        
+        # Check constraint preservation
+        marginals, _ = compute_marginals(theta, N)
+        C_current = sum(marginal_entropy(m) for m in marginals)
+        constraint_values.append(C_current)
+        
+        # Verbose output
+        if verbose and step % 100 == 0:
+            print(f"Step {step:4d}: ||F|| = {flow_norm:.6f}, "
+                  f"ΔC = {abs(C_current - C_init):.8f}")
+        
+        # Check convergence
+        if flow_norm < convergence_tol:
+            if verbose:
+                print(f"\nConverged at step {step}")
+            return {
+                'trajectory': np.array(trajectory),
+                'flow_norms': np.array(flow_norms),
+                'constraint_values': np.array(constraint_values),
+                'C_init': C_init,
+                'converged': True,
+                'n_steps': step + 1
+            }
+    
+    if verbose:
+        print(f"\nReached maximum steps ({n_steps})")
+    
+    return {
+        'trajectory': np.array(trajectory),
+        'flow_norms': np.array(flow_norms),
+        'constraint_values': np.array(constraint_values),
+        'C_init': C_init,
+        'converged': False,
+        'n_steps': n_steps
     }
 
 
@@ -410,109 +529,417 @@ def plot_correlation_analysis(theta, N, corr_info,
     print(f"✓ Saved: {filename}")
 
 
-# ============================================================================
-# Main Analysis
-# ============================================================================
-
-def main():
-    """Run complete GENERIC decomposition analysis for N=3 example."""
+def plot_constrained_trajectory(solution, theta_final, 
+                                filename='generic_n3_constrained_trajectory.pdf'):
+    """
+    Visualize the constrained max ent dynamics trajectory.
     
-    print("=" * 70)
-    print("GENERIC Decomposition: Three Binary Variables")
-    print("=" * 70)
+    Shows:
+    1. Parameter trajectory in 2D projection
+    2. Flow norm convergence
+    3. Constraint preservation
+    """
     
-    # Champion parameters from optimization
-    # (Found via systematic search to maximize ||A||/||S||)
-    theta = np.array([-0.03686028, 0.63441936, -0.54477752, 
-                     -1.18199556, 1.20331936, -0.12567841])
+    fig = plt.figure(figsize=(12, 3.5))
+    gs = fig.add_gridspec(1, 3, hspace=0.3, wspace=0.35)
     
-    N = 3  # Three binary variables
+    trajectory = solution['trajectory']
+    flow_norms = solution['flow_norms']
+    constraint_values = solution['constraint_values']
+    C_init = solution['C_init']
+    n_steps = solution['n_steps']
     
-    print(f"\nParameters θ = (θ₁, θ₂, θ₃, θ₁₂, θ₁₃, θ₂₃):")
-    print(f"  {theta}")
+    # 1. Parameter trajectory (project to first 2 dimensions)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(trajectory[:, 0], trajectory[:, 1], 'b-', alpha=0.6, linewidth=1.5)
+    ax1.plot(trajectory[0, 0], trajectory[0, 1], 'go', markersize=8, 
+            label='Initial', zorder=5)
+    ax1.plot(trajectory[-1, 0], trajectory[-1, 1], 'r*', markersize=12, 
+            label='Final', zorder=5)
     
-    print(f"\nInterpretation:")
-    print(f"  θ₁  = {theta[0]:7.3f}  (marginal bias for X₁)")
-    print(f"  θ₂  = {theta[1]:7.3f}  (marginal bias for X₂)")
-    print(f"  θ₃  = {theta[2]:7.3f}  (marginal bias for X₃)")
-    print(f"  θ₁₂ = {theta[3]:7.3f}  (X₁-X₂ interaction, STRONG NEGATIVE)")
-    print(f"  θ₁₃ = {theta[4]:7.3f}  (X₁-X₃ interaction, STRONG POSITIVE)")
-    print(f"  θ₂₃ = {theta[5]:7.3f}  (X₂-X₃ interaction, weak)")
+    # Add arrows showing direction
+    n_arrows = 5
+    arrow_indices = np.linspace(10, len(trajectory)-10, n_arrows, dtype=int)
+    for idx in arrow_indices:
+        dx = trajectory[idx+5, 0] - trajectory[idx, 0]
+        dy = trajectory[idx+5, 1] - trajectory[idx, 1]
+        ax1.arrow(trajectory[idx, 0], trajectory[idx, 1], dx*0.5, dy*0.5,
+                 head_width=0.02, head_length=0.02, fc='blue', ec='blue', 
+                 alpha=0.4, linewidth=0.8)
     
-    print(f"\n{'─' * 70}")
-    print("GENERIC Decomposition Analysis")
-    print('─' * 70)
+    ax1.set_xlabel(r'$\theta_1$ (marginal bias $X_1$)')
+    ax1.set_ylabel(r'$\theta_2$ (marginal bias $X_2$)')
+    ax1.set_title('Trajectory on Constraint Manifold')
+    ax1.legend(fontsize=8)
+    ax1.grid(True, alpha=0.3)
     
-    # Perform decomposition
-    result = analyze_generic_structure(theta, N)
+    # 2. Flow norm convergence
+    ax2 = fig.add_subplot(gs[0, 1])
+    steps = np.arange(len(flow_norms))
+    ax2.semilogy(steps, flow_norms, 'b-', linewidth=1.5)
+    ax2.set_xlabel('Gradient step')
+    ax2.set_ylabel(r'$\|F(\theta)\|$ (flow magnitude)')
+    ax2.set_title('Convergence to Stationary Point')
+    ax2.grid(True, alpha=0.3, which='both')
+    ax2.axhline(1e-6, color='r', linestyle='--', linewidth=1, 
+               alpha=0.5, label='Convergence threshold')
+    ax2.legend(fontsize=8)
     
-    print(f"\nLinearized dynamics: M = ∂F/∂θ at this point")
-    print(f"  ||M||_F = {np.linalg.norm(result['M'], 'fro'):.4f}")
-    print(f"  ||F||   = {np.linalg.norm(result['F']):.4f}  (non-equilibrium point)")
+    # 3. Constraint preservation
+    ax3 = fig.add_subplot(gs[0, 2])
+    steps = np.arange(len(constraint_values))
+    constraint_deviation = np.abs(np.array(constraint_values) - C_init)
+    ax3.semilogy(steps, constraint_deviation, 'g-', linewidth=1.5)
+    ax3.set_xlabel('Gradient step')
+    ax3.set_ylabel(r'$|\sum_i H(X_i) - C|$ (constraint violation)')
+    ax3.set_title('Constraint Preservation')
+    ax3.grid(True, alpha=0.3, which='both')
     
-    print(f"\nDecomposition: M = S + A")
-    print(f"  Symmetric part:     ||S|| = {result['norm_S']:.4f}")
-    print(f"  Antisymmetric part: ||A|| = {result['norm_A']:.4f}")
-    print(f"\n  ★ Ratio: ||A||/||S|| = {result['ratio']:.4f}")
+    # Add text annotation
+    final_violation = constraint_deviation[-1]
+    ax3.text(0.5, 0.95, f'Final violation: {final_violation:.2e}', 
+            transform=ax3.transAxes, ha='center', va='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+            fontsize=8)
     
-    if result['ratio'] > 1.0:
-        print(f"\n  🎯 CONSERVATION-DOMINATED REGIME!")
-        print(f"     Antisymmetric (conservative) component EXCEEDS symmetric (dissipative)")
-    elif result['ratio'] > 0.5:
-        print(f"\n  ⚖️  BALANCED REGIME")
-        print(f"     Conservative and dissipative effects are comparable")
-    else:
-        print(f"\n  🔥 DISSIPATION-DOMINATED REGIME")
-        print(f"     Symmetric (dissipative) component dominates")
-    
-    print(f"\nEigenvalue structure:")
-    print(f"  S eigenvalues (real):       {np.sort(result['eigs_S'].real)}")
-    print(f"  A eigenvalues (imaginary):  {np.sort(result['eigs_A'].imag)}i")
-    
-    # Correlation structure analysis
-    print(f"\n{'─' * 70}")
-    print("Correlation Structure Analysis")
-    print('─' * 70)
-    
-    corr_info = analyze_correlation_structure(theta, N)
-    
-    print(f"\nCorrelation coefficients:")
-    corr_matrix = corr_info['correlation_matrix']
-    print(f"  ρ(X₁, X₂) = {corr_matrix[0, 1]:7.3f}")
-    print(f"  ρ(X₁, X₃) = {corr_matrix[0, 2]:7.3f}  ← OPPOSITE SIGNS!")
-    print(f"  ρ(X₂, X₃) = {corr_matrix[1, 2]:7.3f}")
-    
-    print(f"\nMarginal probabilities P(Xᵢ = 1):")
-    for i, p in enumerate(corr_info['marginal_probs']):
-        print(f"  P(X₁ = 1) = {p:.3f}")
-    
-    print(f"\n{'─' * 70}")
-    print("Geometric Interpretation")
-    print('─' * 70)
-    print(f"\nThe pattern θ₁₂ ≈ -θ₁₃ creates GEOMETRIC FRUSTRATION:")
-    print(f"  • X₁ wants to anticorrelate with X₂ (θ₁₂ < 0)")
-    print(f"  • X₁ wants to correlate with X₃ (θ₁₃ > 0)")
-    print(f"  • These opposing forces cannot be simultaneously satisfied")
-    print(f"\nThis frustration curves the constraint manifold sharply,")
-    print(f"creating strong geometric phases → large antisymmetric component A")
-    
-    # Generate figures
-    print(f"\n{'─' * 70}")
-    print("Generating Figures")
-    print('─' * 70)
-    
-    plot_phase_space_decomposition(result)
-    plot_correlation_analysis(theta, N, corr_info)
-    
-    print(f"\n{'=' * 70}")
-    print("Analysis Complete")
-    print('=' * 70)
-    print(f"\nFor comparison:")
-    print(f"  • Typical near-Gaussian regime: ||A||/||S|| ≈ 0.01-0.05")
-    print(f"  • This example: ||A||/||S|| = {result['ratio']:.4f}")
-    print(f"  • Improvement: {result['ratio']/0.017:.1f}× larger antisymmetric component")
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
 
 
-if __name__ == "__main__":
-    main()
+def solve_unconstrained_maxent(theta_init, N, n_steps=2000, dt=0.01,
+                                convergence_tol=1e-6, verbose=False):
+    """
+    Solve pure (unconstrained) max ent dynamics via gradient ascent.
+    
+    Dynamics: dθ/dt = -G(θ)θ
+    
+    This performs gradient ascent on joint entropy H(X₁,...,Xₙ) WITHOUT
+    any constraint. The system converges to θ=0 (uniform distribution).
+    
+    Parameters
+    ----------
+    theta_init : array
+        Initial parameter values
+    N : int
+        Number of binary variables
+    n_steps : int
+        Maximum number of gradient steps
+    dt : float
+        Step size for gradient descent
+    convergence_tol : float
+        Stop when ||F|| < convergence_tol
+    verbose : bool
+        Print progress information
+        
+    Returns
+    -------
+    dict with keys:
+        trajectory : array of shape (n_actual_steps, d)
+            Parameter trajectory θ(t)
+        flow_norms : array
+            ||F(θ)|| at each step
+        converged : bool
+            Whether convergence criterion was met
+    """
+    d = N + N*(N-1)//2
+    trajectory = [theta_init.copy()]
+    flow_norms = []
+    theta = theta_init.copy()
+    
+    for step in range(n_steps):
+        # Unconstrained flow: maximize joint entropy
+        G = compute_fisher(theta, N)
+        F = -G @ theta  # Pure gradient ascent
+        
+        # Gradient descent step
+        theta = theta + dt * F
+        
+        # Track metrics
+        flow_norm = np.linalg.norm(F)
+        flow_norms.append(flow_norm)
+        trajectory.append(theta.copy())
+        
+        # Verbose output
+        if verbose and step % 100 == 0:
+            print(f"Step {step:4d}: ||F|| = {flow_norm:.6f}")
+        
+        # Check convergence
+        if flow_norm < convergence_tol:
+            if verbose:
+                print(f"\nConverged at step {step}")
+            return {
+                'trajectory': np.array(trajectory),
+                'flow_norms': np.array(flow_norms),
+                'converged': True,
+                'n_steps': step + 1
+            }
+    
+    if verbose:
+        print(f"\nReached maximum steps ({n_steps})")
+    
+    return {
+        'trajectory': np.array(trajectory),
+        'flow_norms': np.array(flow_norms),
+        'converged': False,
+        'n_steps': n_steps
+    }
+
+
+def plot_constrained_vs_unconstrained(solution_constrained, solution_unconstrained,
+                                      filename='generic_n3_constrained_vs_unconstrained.pdf'):
+    """
+    Compare constrained vs unconstrained max ent dynamics.
+    
+    Shows how the marginal entropy constraint affects the convergence path.
+    """
+    
+    fig = plt.figure(figsize=(15, 10))
+    gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.35)
+    
+    traj_c = solution_constrained['trajectory']
+    traj_u = solution_unconstrained['trajectory']
+    flow_c = solution_constrained['flow_norms']
+    flow_u = solution_unconstrained['flow_norms']
+    
+    # Diagnostic output
+    print("\n=== Diagnostic Info ===")
+    print(f"Constrained trajectory shape: {traj_c.shape}")
+    print(f"Unconstrained trajectory shape: {traj_u.shape}")
+    print(f"\nInitial θ (constrained):   {traj_c[0]}")
+    print(f"Initial θ (unconstrained): {traj_u[0]}")
+    print(f"\nFinal θ (constrained):   {traj_c[-1]}")
+    print(f"Final θ (unconstrained): {traj_u[-1]}")
+    print(f"\nDistance between final points: {np.linalg.norm(traj_c[-1] - traj_u[-1]):.4f}")
+    
+    # Compute marginal and joint entropy at key points
+    def compute_joint_entropy(theta, N):
+        """Compute joint entropy H(X₁,X₂,X₃)"""
+        marginals, probs = compute_marginals(theta, N)
+        # Joint entropy: -Σ p(x) log p(x)
+        p_clean = probs[probs > 1e-10]
+        return -np.sum(p_clean * np.log(p_clean))
+    
+    marginals_c_init, _ = compute_marginals(traj_c[0], 3)
+    marginals_c_final, _ = compute_marginals(traj_c[-1], 3)
+    marginals_u_init, _ = compute_marginals(traj_u[0], 3)
+    marginals_u_final, _ = compute_marginals(traj_u[-1], 3)
+    
+    sum_H_c_init = sum(marginal_entropy(m) for m in marginals_c_init)
+    sum_H_c_final = sum(marginal_entropy(m) for m in marginals_c_final)
+    sum_H_u_init = sum(marginal_entropy(m) for m in marginals_u_init)
+    sum_H_u_final = sum(marginal_entropy(m) for m in marginals_u_final)
+    
+    H_joint_c_init = compute_joint_entropy(traj_c[0], 3)
+    H_joint_c_final = compute_joint_entropy(traj_c[-1], 3)
+    H_joint_u_init = compute_joint_entropy(traj_u[0], 3)
+    H_joint_u_final = compute_joint_entropy(traj_u[-1], 3)
+    
+    print(f"\nMarginal Entropy Σᵢ H(Xᵢ):")
+    print(f"  Constrained:   {sum_H_c_init:.6f} → {sum_H_c_final:.6f} (Δ = {abs(sum_H_c_final - sum_H_c_init):.6f})")
+    print(f"  Unconstrained: {sum_H_u_init:.6f} → {sum_H_u_final:.6f} (Δ = {abs(sum_H_u_final - sum_H_u_init):.6f})")
+    
+    print(f"\nJoint Entropy H(X₁,X₂,X₃):")
+    print(f"  Constrained:   {H_joint_c_init:.6f} → {H_joint_c_final:.6f} (Δ = {H_joint_c_final - H_joint_c_init:+.6f})")
+    print(f"  Unconstrained: {H_joint_u_init:.6f} → {H_joint_u_final:.6f} (Δ = {H_joint_u_final - H_joint_u_init:+.6f})")
+    print(f"  Max possible: {3*np.log(2):.6f} (uniform distribution)")
+    
+    # Check if constrained is really staying constant
+    if 'constraint_values' in solution_constrained:
+        C_values = solution_constrained['constraint_values']
+        C_std = np.std(C_values)
+        print(f"\nConstrained Σᵢ H(Xᵢ) std dev over trajectory: {C_std:.8f}")
+        print(f"  Min: {np.min(C_values):.6f}, Max: {np.max(C_values):.6f}, Range: {np.max(C_values) - np.min(C_values):.6f}")
+    
+    print("=" * 70 + "\n")
+    
+    # 1. Trajectory comparison (θ₁ vs θ₂ projection)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(traj_u[:, 0], traj_u[:, 1], 'r-', alpha=0.6, linewidth=2, 
+            label='Unconstrained')
+    ax1.plot(traj_c[:, 0], traj_c[:, 1], 'b-', alpha=0.6, linewidth=2,
+            label='Constrained')
+    ax1.plot(traj_c[0, 0], traj_c[0, 1], 'go', markersize=10, 
+            label='Initial', zorder=5)
+    ax1.plot(traj_u[-1, 0], traj_u[-1, 1], 'r*', markersize=14,
+            label='Unconstrained end', zorder=5)
+    ax1.plot(traj_c[-1, 0], traj_c[-1, 1], 'bs', markersize=10,
+            label='Constrained end', zorder=5)
+    
+    ax1.set_xlabel(r'$\theta_1$')
+    ax1.set_ylabel(r'$\theta_2$')
+    ax1.set_title('Trajectories in Parameter Space')
+    ax1.legend(fontsize=7, loc='best')
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.5)
+    ax1.axvline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.5)
+    
+    # 2. Joint entropy evolution (check monotonicity)
+    ax2 = fig.add_subplot(gs[0, 1])
+    # Compute joint entropy for both trajectories
+    joint_entropy_u = []
+    joint_entropy_c = []
+    
+    # Sample every 10th point for efficiency
+    sample_indices = np.arange(0, max(len(traj_u), len(traj_c)), 10)
+    for idx in sample_indices:
+        if idx < len(traj_u):
+            H_u = compute_joint_entropy(traj_u[idx], 3)
+            joint_entropy_u.append(H_u)
+        if idx < len(traj_c):
+            H_c = compute_joint_entropy(traj_c[idx], 3)
+            joint_entropy_c.append(H_c)
+    
+    sample_u = sample_indices[:len(joint_entropy_u)]
+    sample_c = sample_indices[:len(joint_entropy_c)]
+    ax2.plot(sample_u, joint_entropy_u, 'r-', linewidth=2, label='Unconstrained')
+    ax2.plot(sample_c, joint_entropy_c, 'b-', linewidth=2, label='Constrained')
+    ax2.axhline(3*np.log(2), color='k', linestyle='--', linewidth=1, 
+               alpha=0.5, label='Max (uniform)')
+    ax2.set_xlabel('Gradient step')
+    ax2.set_ylabel(r'$H(X_1,X_2,X_3)$ (joint entropy)')
+    ax2.set_title('Joint Entropy Evolution (should increase)')
+    ax2.legend(fontsize=7, loc='best')
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Distance from origin (convergence to uniform)
+    ax3 = fig.add_subplot(gs[0, 2])
+    dist_u = np.linalg.norm(traj_u, axis=1)
+    dist_c = np.linalg.norm(traj_c, axis=1)
+    steps_u = np.arange(len(dist_u))
+    steps_c = np.arange(len(dist_c))
+    
+    ax3.semilogy(steps_u, dist_u, 'r-', linewidth=2, label='Unconstrained')
+    ax3.semilogy(steps_c, dist_c, 'b-', linewidth=2, label='Constrained')
+    ax3.set_xlabel('Gradient step')
+    ax3.set_ylabel(r'$\|\theta\|$ (distance from $\theta=0$)')
+    ax3.set_title('Convergence to Equilibrium')
+    ax3.legend(fontsize=8)
+    ax3.grid(True, alpha=0.3, which='both')
+    
+    # 4. Flow norm comparison
+    ax4 = fig.add_subplot(gs[1, 0])
+    steps_u = np.arange(len(flow_u))
+    steps_c = np.arange(len(flow_c))
+    ax4.semilogy(steps_u, flow_u, 'r-', linewidth=1.5, label='Unconstrained')
+    ax4.semilogy(steps_c, flow_c, 'b-', linewidth=1.5, label='Constrained')
+    ax4.set_xlabel('Gradient step')
+    ax4.set_ylabel(r'$\|F(\theta)\|$ (flow magnitude)')
+    ax4.set_title('Flow Norm Convergence')
+    ax4.legend(fontsize=8)
+    ax4.grid(True, alpha=0.3, which='both')
+    
+    # 5. Marginal entropy over time
+    ax5 = fig.add_subplot(gs[1, 1])
+    # Compute marginal entropy sum for both trajectories
+    marginal_entropy_u = []
+    marginal_entropy_c = []
+    
+    # Sample every 10th point for efficiency
+    sample_indices = np.arange(0, max(len(traj_u), len(traj_c)), 10)
+    for idx in sample_indices:
+        if idx < len(traj_u):
+            marginals_u, _ = compute_marginals(traj_u[idx], 3)
+            marginal_entropy_u.append(sum(marginal_entropy(m) for m in marginals_u))
+        if idx < len(traj_c):
+            marginals_c, _ = compute_marginals(traj_c[idx], 3)
+            marginal_entropy_c.append(sum(marginal_entropy(m) for m in marginals_c))
+    
+    sample_u = sample_indices[:len(marginal_entropy_u)]
+    sample_c = sample_indices[:len(marginal_entropy_c)]
+    ax5.plot(sample_u, marginal_entropy_u, 'r-', linewidth=2, label='Unconstrained')
+    ax5.plot(sample_c, marginal_entropy_c, 'b-', linewidth=2, label='Constrained')
+    ax5.set_xlabel('Gradient step')
+    ax5.set_ylabel(r'$\sum_i H(X_i)$ (marginal entropy sum)')
+    ax5.set_title('Marginal Entropy Evolution')
+    ax5.legend(fontsize=8)
+    ax5.grid(True, alpha=0.3)
+    
+    # 6. Text summary
+    ax6 = fig.add_subplot(gs[1, 2])
+    ax6.axis('off')
+    
+    summary_text = (
+        r"$\mathbf{Key\ Observations:}$" + "\n\n"
+        
+        r"$\bullet$ $\mathbf{Unconstrained}$ (red): Pure max ent $\rightarrow$ uniform" + "\n"
+        f"   • Converges to θ=0 (all parameters → 0)\n"
+        f"   • Final ||θ|| = {dist_u[-1]:.2e}\n"
+        f"   • Marginal entropy → {marginal_entropy_u[-1]:.3f} (max)\n\n"
+        
+        r"$\bullet$ $\mathbf{Constrained}$ (blue): Max ent on manifold" + "\n"
+        f"   • Stays on Σᵢ H(Xᵢ) = C surface\n"
+        f"   • Final ||θ|| = {dist_c[-1]:.3f}\n"
+        f"   • Marginal entropy = {marginal_entropy_c[-1]:.3f} (fixed)\n\n"
+        
+        r"$\bullet$ $\mathbf{Constraint\ effect}$:" + "\n"
+        "   • Unconstrained: Straight path to origin\n"
+        "   • Constrained: Curved path along manifold\n"
+        "   • Different equilibria!"
+    )
+    
+    ax6.text(0.05, 0.95, summary_text, transform=ax6.transAxes,
+            fontsize=9, verticalalignment='top', family='serif',
+            bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.3))
+    
+    # 7. Marginal parameters (θ₁, θ₂, θ₃) over time
+    ax7 = fig.add_subplot(gs[2, 0])
+    steps_c = np.arange(len(traj_c))
+    steps_u = np.arange(len(traj_u))
+    
+    for i, label in enumerate([r'$\theta_1$', r'$\theta_2$', r'$\theta_3$']):
+        ax7.plot(steps_u, traj_u[:, i], '--', alpha=0.5, linewidth=1.5, 
+                color=f'C{i}', label=f'{label} (unconstrained)')
+        ax7.plot(steps_c, traj_c[:, i], '-', linewidth=2, 
+                color=f'C{i}', label=f'{label} (constrained)')
+    
+    ax7.set_xlabel('Gradient step')
+    ax7.set_ylabel('Parameter value')
+    ax7.set_title('Marginal Bias Parameters')
+    ax7.legend(fontsize=7, ncol=2, loc='best')
+    ax7.grid(True, alpha=0.3)
+    ax7.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    # 8. Pairwise parameters (θ₁₂, θ₁₃, θ₂₃) over time
+    ax8 = fig.add_subplot(gs[2, 1])
+    
+    for i, label in enumerate([r'$\theta_{12}$', r'$\theta_{13}$', r'$\theta_{23}$']):
+        param_idx = 3 + i
+        ax8.plot(steps_u, traj_u[:, param_idx], '--', alpha=0.5, linewidth=1.5,
+                color=f'C{i}', label=f'{label} (unconstrained)')
+        ax8.plot(steps_c, traj_c[:, param_idx], '-', linewidth=2,
+                color=f'C{i}', label=f'{label} (constrained)')
+    
+    ax8.set_xlabel('Gradient step')
+    ax8.set_ylabel('Parameter value')
+    ax8.set_title('Pairwise Interaction Parameters')
+    ax8.legend(fontsize=7, ncol=2, loc='best')
+    ax8.grid(True, alpha=0.3)
+    ax8.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    # 9. Parameter trajectory in 3D (θ₁ vs θ₂ vs θ₃)
+    ax9 = fig.add_subplot(gs[2, 2], projection='3d')
+    
+    # Downsample for clarity
+    skip = 20
+    ax9.plot(traj_u[::skip, 0], traj_u[::skip, 1], traj_u[::skip, 2], 
+            'r-', alpha=0.5, linewidth=1.5, label='Unconstrained')
+    ax9.plot(traj_c[::skip, 0], traj_c[::skip, 1], traj_c[::skip, 2],
+            'b-', alpha=0.7, linewidth=2, label='Constrained')
+    ax9.scatter(traj_c[0, 0], traj_c[0, 1], traj_c[0, 2], 
+               c='g', s=50, marker='o', label='Initial')
+    ax9.scatter(traj_u[-1, 0], traj_u[-1, 1], traj_u[-1, 2],
+               c='r', s=100, marker='*', label='Unc. end')
+    ax9.scatter(traj_c[-1, 0], traj_c[-1, 1], traj_c[-1, 2],
+               c='b', s=80, marker='s', label='Con. end')
+    
+    ax9.set_xlabel(r'$\theta_1$', fontsize=8)
+    ax9.set_ylabel(r'$\theta_2$', fontsize=8)
+    ax9.set_zlabel(r'$\theta_3$', fontsize=8)
+    ax9.set_title('3D Trajectory (Marginal Params)', fontsize=9)
+    ax9.legend(fontsize=6, loc='upper left')
+    ax9.grid(True, alpha=0.3)
+    
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+
 

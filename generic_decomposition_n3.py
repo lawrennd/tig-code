@@ -14,6 +14,7 @@ Main Functions:
     solve_unconstrained_maxent() - Gradient descent for pure max ent (no constraint)
     analyze_generic_structure() - Compute M = S + A decomposition at a point
     analyze_correlation_structure() - Analyze frustration patterns
+    temperature_scaling_experiment() - Test physics prediction of intermediate-T peak
     plot_phase_space_decomposition() - Visualize linearized dynamics
     plot_correlation_analysis() - Visualize correlation structure
     plot_constrained_trajectory() - Visualize gradient descent trajectory
@@ -941,5 +942,129 @@ def plot_constrained_vs_unconstrained(solution_constrained, solution_unconstrain
     
     plt.savefig(filename, bbox_inches='tight', dpi=300)
     print(f"✓ Saved: {filename}")
+
+
+def temperature_scaling_experiment(theta_base, N, beta_values=None,
+                                   filename='generic_n3_temperature_scaling.pdf'):
+    """
+    Explore temperature scaling of GENERIC structure.
+    
+    Physics motivation: In Ising/Boltzmann models, parameters scale with inverse 
+    temperature β. At high T (β→0), thermal fluctuations dominate (dissipative).
+    At low T (β→∞), system freezes (also dissipative). At intermediate T, 
+    frustrated interactions create strong conservative dynamics.
+    
+    This experiment validates the physics prediction that ||A||/||S|| peaks at 
+    intermediate temperature.
+    
+    Parameters:
+    -----------
+    theta_base : ndarray, shape (6,)
+        Base parameter vector (champion parameters at β=1)
+    N : int
+        Number of binary variables (should be 3)
+    beta_values : ndarray, optional
+        Array of inverse temperatures to scan. Default: np.linspace(0.1, 3.0, 30)
+    filename : str
+        Output filename for figure
+        
+    Returns:
+    --------
+    dict with keys:
+        'beta_values' : array of β values
+        'ratio_values' : array of ||A||/||S|| ratios
+        'norm_S_values' : array of ||S|| norms
+        'norm_A_values' : array of ||A|| norms
+        'peak_beta' : β value at peak ratio
+        'peak_ratio' : maximum ||A||/||S|| ratio
+    """
+    if beta_values is None:
+        beta_values = np.linspace(0.1, 3.0, 30)
+    
+    ratio_values = []
+    norm_S_values = []
+    norm_A_values = []
+    
+    print("Running temperature scaling experiment...")
+    print(f"  Scanning β ∈ [{beta_values[0]:.2f}, {beta_values[-1]:.2f}] with {len(beta_values)} points")
+    
+    for beta in beta_values:
+        theta_scaled = beta * theta_base
+        try:
+            result = analyze_generic_structure(theta_scaled, N)
+            ratio = result['ratio']
+            ratio_values.append(ratio)
+            norm_S_values.append(result['norm_S'])
+            norm_A_values.append(result['norm_A'])
+        except:
+            # If analysis fails (e.g., numerical issues), append NaN
+            ratio_values.append(np.nan)
+            norm_S_values.append(np.nan)
+            norm_A_values.append(np.nan)
+    
+    ratio_values = np.array(ratio_values)
+    norm_S_values = np.array(norm_S_values)
+    norm_A_values = np.array(norm_A_values)
+    
+    # Find peak
+    valid_mask = ~np.isnan(ratio_values)
+    if np.any(valid_mask):
+        peak_idx = np.nanargmax(ratio_values)
+        peak_beta = beta_values[peak_idx]
+        peak_ratio = ratio_values[peak_idx]
+    else:
+        peak_beta = np.nan
+        peak_ratio = np.nan
+    
+    print(f"  Peak ratio: ||A||/||S|| = {peak_ratio:.3f} at β = {peak_beta:.3f}")
+    print(f"  Base parameters (β=1.0): ||A||/||S|| = {ratio_values[np.argmin(np.abs(beta_values - 1.0))]:.3f}")
+    
+    # Create figure
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    
+    # Plot 1: ||A||/||S|| ratio vs temperature
+    ax1 = axes[0]
+    ax1.plot(beta_values, ratio_values, 'b-', linewidth=2, label=r'$\|A\|/\|S\|$')
+    ax1.axvline(peak_beta, color='r', linestyle='--', linewidth=1, alpha=0.7, 
+                label=f'Peak: β={peak_beta:.2f}')
+    ax1.axvline(1.0, color='g', linestyle='--', linewidth=1, alpha=0.7, 
+                label='Base: β=1.0')
+    ax1.set_xlabel(r'Inverse Temperature $\beta$', fontsize=11)
+    ax1.set_ylabel(r'Ratio $\|A\|/\|S\|$', fontsize=11)
+    ax1.set_title('Conservative vs Dissipative Balance', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=9)
+    
+    # Add regime labels
+    ax1.text(0.2, ax1.get_ylim()[1]*0.9, 'High T\n(Thermal)', 
+             ha='center', va='top', fontsize=9, alpha=0.7)
+    ax1.text(2.7, ax1.get_ylim()[1]*0.9, 'Low T\n(Frozen)', 
+             ha='center', va='top', fontsize=9, alpha=0.7)
+    ax1.text(peak_beta, ax1.get_ylim()[1]*0.6, 'Frustrated\nRegime', 
+             ha='center', va='top', fontsize=9, color='r', weight='bold')
+    
+    # Plot 2: Individual norms
+    ax2 = axes[1]
+    ax2.plot(beta_values, norm_S_values, 'r-', linewidth=2, label=r'$\|S\|$ (Dissipative)')
+    ax2.plot(beta_values, norm_A_values, 'b-', linewidth=2, label=r'$\|A\|$ (Conservative)')
+    ax2.axvline(peak_beta, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax2.set_xlabel(r'Inverse Temperature $\beta$', fontsize=11)
+    ax2.set_ylabel('Frobenius Norm', fontsize=11)
+    ax2.set_title('Component Magnitudes', fontsize=12)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    
+    return {
+        'beta_values': beta_values,
+        'ratio_values': ratio_values,
+        'norm_S_values': norm_S_values,
+        'norm_A_values': norm_A_values,
+        'peak_beta': peak_beta,
+        'peak_ratio': peak_ratio
+    }
 
 

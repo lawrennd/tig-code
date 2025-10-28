@@ -10,28 +10,54 @@ how constraint geometry creates antisymmetric (conservative) flow alongside
 symmetric (dissipative) dynamics.
 
 Main Functions:
-    solve_constrained_maxent() - Gradient descent to solve constrained max ent
-    solve_unconstrained_maxent() - Gradient descent for pure max ent (no constraint)
+    Core Analysis:
     analyze_generic_structure() - Compute M = S + A decomposition at a point
     analyze_correlation_structure() - Analyze frustration patterns
-    temperature_scaling_experiment() - Test physics prediction of intermediate-T peak
-    plot_phase_space_decomposition() - Visualize linearized dynamics
-    plot_correlation_analysis() - Visualize correlation structure
-    plot_constrained_trajectory() - Visualize gradient descent trajectory
-    plot_constrained_vs_unconstrained() - Compare constrained vs unconstrained flows
+        compute_joint_entropy_trajectory() - H(X₁,...,Xₙ) along trajectory
+        compute_marginal_entropy_trajectory() - Σᵢ H(Xᵢ) along trajectory
+        compute_regime_along_trajectory() - ||A||/||S|| along trajectory
+    
+    Solvers:
+        solve_constrained_maxent() - Gradient descent with constraint
+        solve_unconstrained_maxent() - Gradient descent without constraint
+    
+    Single-Panel Publication Figures (Section 4):
+        save_constraint_maintenance() - |Σh_i(t) - C| vs time
+        save_convergence() - ||F(θ)|| vs time
+        save_trajectory_comparison() - Parameter space trajectories
+        save_joint_entropy_evolution() - H(t) for both dynamics
+        save_marginal_entropy_evolution() - Σh_i(t) for both
+        save_flow_comparison() - ||F|| comparison
+        save_distance_evolution() - ||θ|| comparison
+        save_marginal_parameters() - θ₁,θ₂,θ₃ evolution
+        save_interaction_parameters() - θ₁₂,θ₁₃,θ₂₃ evolution
+        save_regime_variation() - ||A||/||S|| vs time
+        save_component_norms() - ||S|| and ||A|| separately
+        save_correlation_structure() - Correlation matrix
+        save_decomposition_table() - LaTeX table
+    
+    Multi-Panel Exploration Figures:
+        plot_phase_space_decomposition() - Visualize S, A, M dynamics
+        plot_correlation_analysis() - Full correlation analysis
+        plot_constrained_trajectory() - Trajectory visualization
+        plot_constrained_vs_unconstrained() - Full comparison (9 panels)
+        temperature_scaling_experiment() - Physics validation
 
 Usage:
-    This is a function library. Main execution and demonstrations are in
-    accompanying Jupyter notebooks. For standalone use:
-    
     >>> import generic_decomposition_n3 as gd
-    >>> # Solve from initial condition
-    >>> solution = gd.solve_constrained_maxent(theta_init, N=3, verbose=True)
-    >>> # Analyze final point
-    >>> result = gd.analyze_generic_structure(solution['trajectory'][-1], N=3)
-    >>> # Generate figures
-    >>> gd.plot_constrained_trajectory(solution, theta_final)
-    >>> gd.plot_phase_space_decomposition(result)
+    
+    # Run constrained dynamics
+    >>> sol_c = gd.solve_constrained_maxent(theta_init, N=3, verbose=True)
+    >>> sol_u = gd.solve_unconstrained_maxent(theta_init, N=3)
+    
+    # Generate all Section 4 figures
+    >>> gd.save_constraint_maintenance(sol_c)
+    >>> gd.save_trajectory_comparison(sol_c, sol_u)
+    >>> gd.save_regime_variation(sol_c, N=3)
+    
+    # Analyze at specific point
+    >>> result = gd.analyze_generic_structure(theta, N=3)
+    >>> gd.save_decomposition_table(result)
 
 Dependencies:
     numpy, scipy, matplotlib
@@ -367,7 +393,524 @@ def analyze_correlation_structure(theta, N):
 
 
 # ============================================================================
-# Visualization Functions
+# Analysis Helper Functions (for trajectory-based analysis)
+# ============================================================================
+
+def compute_joint_entropy_trajectory(trajectory, N, sample_every=10):
+    """
+    Compute joint entropy H(X₁,...,Xₙ) along trajectory.
+    
+    Parameters
+    ----------
+    trajectory : array, shape (n_steps, d)
+        Parameter trajectory θ(t)
+    N : int
+        Number of binary variables
+    sample_every : int
+        Sample every nth point for efficiency
+        
+    Returns
+    -------
+    sample_indices : array
+        Step numbers where entropy was computed
+    joint_entropy : array
+        H(X₁,...,Xₙ) at each sampled point
+    """
+    states = generate_states(N)
+    features = compute_features_pairwise(states)
+    
+    sample_indices = np.arange(0, len(trajectory), sample_every)
+    joint_entropy = []
+    
+    for idx in sample_indices:
+        theta = trajectory[idx]
+        logits = features @ theta
+        log_Z = np.logaddexp.reduce(logits)
+        probs = np.exp(logits - log_Z)
+        
+        # H = -Σ p(x) log p(x)
+        p_clean = probs[probs > 1e-10]
+        H = -np.sum(p_clean * np.log(p_clean))
+        joint_entropy.append(H)
+    
+    return sample_indices, np.array(joint_entropy)
+
+
+def compute_marginal_entropy_trajectory(trajectory, N, sample_every=10):
+    """
+    Compute marginal entropy sum Σᵢ H(Xᵢ) along trajectory.
+    
+    Parameters
+    ----------
+    trajectory : array, shape (n_steps, d)
+        Parameter trajectory θ(t)
+    N : int
+        Number of binary variables
+    sample_every : int
+        Sample every nth point for efficiency
+        
+    Returns
+    -------
+    sample_indices : array
+        Step numbers where entropy was computed
+    marginal_entropy_sum : array
+        Σᵢ H(Xᵢ) at each sampled point
+    """
+    sample_indices = np.arange(0, len(trajectory), sample_every)
+    marginal_entropy_sum = []
+    
+    for idx in sample_indices:
+        theta = trajectory[idx]
+        marginals, _ = compute_marginals(theta, N)
+        sum_h = sum(marginal_entropy(m) for m in marginals)
+        marginal_entropy_sum.append(sum_h)
+    
+    return sample_indices, np.array(marginal_entropy_sum)
+
+
+def compute_regime_along_trajectory(trajectory, N, sample_every=50):
+    """
+    Compute ||A||/||S|| ratio at sampled points along trajectory.
+    
+    This shows how the balance between conservative and dissipative dynamics
+    varies as the system evolves on the constraint manifold.
+    
+    Parameters
+    ----------
+    trajectory : array, shape (n_steps, d)
+        Parameter trajectory θ(t)
+    N : int
+        Number of binary variables
+    sample_every : int
+        Sample every nth point (GENERIC analysis is expensive)
+        
+    Returns
+    -------
+    dict with keys:
+        sample_indices : array
+            Step numbers where decomposition was computed
+        ratios : array
+            ||A||/||S|| at each point
+        norms_S : array
+            ||S|| at each point
+        norms_A : array
+            ||A|| at each point
+    """
+    sample_indices = np.arange(0, len(trajectory), sample_every)
+    ratios = []
+    norms_S = []
+    norms_A = []
+    
+    for idx in sample_indices:
+        theta = trajectory[idx]
+        try:
+            result = analyze_generic_structure(theta, N)
+            ratios.append(result['ratio'])
+            norms_S.append(result['norm_S'])
+            norms_A.append(result['norm_A'])
+        except:
+            # If analysis fails, append NaN
+            ratios.append(np.nan)
+            norms_S.append(np.nan)
+            norms_A.append(np.nan)
+    
+    return {
+        'sample_indices': sample_indices,
+        'ratios': np.array(ratios),
+        'norms_S': np.array(norms_S),
+        'norms_A': np.array(norms_A)
+    }
+
+
+# ============================================================================
+# Single-Panel Publication Figures (Section 4 of paper)
+# ============================================================================
+
+def save_constraint_maintenance(solution, filename='fig_constraint_maintenance.pdf'):
+    """
+    Plot |Σh_i(t) - C| vs time (log scale).
+    
+    Shows that marginal entropy constraint is maintained during evolution.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    steps = np.arange(len(solution['constraint_values']))
+    deviation = np.abs(solution['constraint_values'] - solution['C_init'])
+    
+    ax.semilogy(steps, deviation, 'b-', linewidth=1.5)
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$|\sum_i h_i(t) - C|$')
+    ax.grid(True, alpha=0.3, which='both')
+    ax.axhline(1e-8, color='r', linestyle='--', linewidth=0.8, alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_convergence(solution, filename='fig_convergence.pdf'):
+    """
+    Plot ||F(θ)|| vs time (log scale).
+    
+    Shows convergence to stationary point where constrained flow vanishes.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    steps = np.arange(len(solution['flow_norms']))
+    ax.semilogy(steps, solution['flow_norms'], 'b-', linewidth=1.5)
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$\|F(\theta)\|$')
+    ax.grid(True, alpha=0.3, which='both')
+    ax.axhline(1e-6, color='r', linestyle='--', linewidth=0.8, alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_trajectory_comparison(sol_constrained, sol_unconstrained, 
+                                filename='fig_trajectory_comparison.pdf'):
+    """
+    Plot θ₁ vs θ₂ projection with both trajectories.
+    
+    Shows how constraint shapes the flow in parameter space.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    traj_c = sol_constrained['trajectory']
+    traj_u = sol_unconstrained['trajectory']
+    
+    # Plot trajectories
+    ax.plot(traj_u[:, 0], traj_u[:, 1], 'r-', alpha=0.6, linewidth=2, 
+            label='Unconstrained')
+    ax.plot(traj_c[:, 0], traj_c[:, 1], 'b-', alpha=0.7, linewidth=2,
+            label='Constrained')
+    
+    # Mark initial and final points
+    ax.plot(traj_c[0, 0], traj_c[0, 1], 'go', markersize=8, 
+            label='Initial', zorder=5)
+    ax.plot(traj_u[-1, 0], traj_u[-1, 1], 'r*', markersize=12, zorder=5)
+    ax.plot(traj_c[-1, 0], traj_c[-1, 1], 'bs', markersize=8, zorder=5)
+    
+    ax.set_xlabel(r'$\theta_1$')
+    ax.set_ylabel(r'$\theta_2$')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    ax.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    ax.axvline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_joint_entropy_evolution(sol_constrained, sol_unconstrained, N,
+                                  filename='fig_joint_entropy_evolution.pdf'):
+    """
+    Plot H(X₁,X₂,X₃) vs time for both dynamics.
+    
+    Shows that both increase joint entropy (second law), but at different rates.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    # Compute joint entropy for both trajectories
+    steps_u, H_u = compute_joint_entropy_trajectory(sol_unconstrained['trajectory'], N, sample_every=10)
+    steps_c, H_c = compute_joint_entropy_trajectory(sol_constrained['trajectory'], N, sample_every=10)
+    
+    ax.plot(steps_u, H_u, 'r-', linewidth=2, label='Unconstrained')
+    ax.plot(steps_c, H_c, 'b-', linewidth=2, label='Constrained')
+    ax.axhline(N*np.log(2), color='k', linestyle='--', linewidth=1, 
+               alpha=0.5, label='Maximum')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$H(X_1,X_2,X_3)$')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_marginal_entropy_evolution(sol_constrained, sol_unconstrained, N,
+                                     filename='fig_marginal_entropy_evolution.pdf'):
+    """
+    Plot Σh_i vs time for both dynamics.
+    
+    Shows constrained maintains constant sum, unconstrained does not.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    # Compute marginal entropy sum for both
+    steps_u, sum_h_u = compute_marginal_entropy_trajectory(sol_unconstrained['trajectory'], N, sample_every=10)
+    steps_c, sum_h_c = compute_marginal_entropy_trajectory(sol_constrained['trajectory'], N, sample_every=10)
+    
+    ax.plot(steps_u, sum_h_u, 'r-', linewidth=2, label='Unconstrained')
+    ax.plot(steps_c, sum_h_c, 'b-', linewidth=2, label='Constrained')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$\sum_i h_i$')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_flow_comparison(sol_constrained, sol_unconstrained,
+                         filename='fig_flow_comparison.pdf'):
+    """
+    Plot ||F(θ)|| vs time for both dynamics.
+    
+    Shows different convergence rates due to constraint.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    steps_u = np.arange(len(sol_unconstrained['flow_norms']))
+    steps_c = np.arange(len(sol_constrained['flow_norms']))
+    
+    ax.semilogy(steps_u, sol_unconstrained['flow_norms'], 'r-', 
+                linewidth=2, label='Unconstrained')
+    ax.semilogy(steps_c, sol_constrained['flow_norms'], 'b-', 
+                linewidth=2, label='Constrained')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$\|F(\theta)\|$')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, which='both')
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_distance_evolution(sol_constrained, sol_unconstrained,
+                            filename='fig_distance_evolution.pdf'):
+    """
+    Plot ||θ|| vs time for both dynamics.
+    
+    Shows convergence to origin (unconstrained) vs convergence on manifold (constrained).
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    traj_u = sol_unconstrained['trajectory']
+    traj_c = sol_constrained['trajectory']
+    
+    dist_u = np.linalg.norm(traj_u, axis=1)
+    dist_c = np.linalg.norm(traj_c, axis=1)
+    
+    steps_u = np.arange(len(dist_u))
+    steps_c = np.arange(len(dist_c))
+    
+    ax.semilogy(steps_u, dist_u, 'r-', linewidth=2, label='Unconstrained')
+    ax.semilogy(steps_c, dist_c, 'b-', linewidth=2, label='Constrained')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$\|\theta\|$')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, which='both')
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_marginal_parameters(sol_constrained, sol_unconstrained,
+                             filename='fig_marginal_parameters.pdf'):
+    """
+    Plot θ₁, θ₂, θ₃ vs time for both dynamics.
+    
+    Shows how marginal bias parameters evolve differently under constraint.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    traj_u = sol_unconstrained['trajectory']
+    traj_c = sol_constrained['trajectory']
+    
+    steps_u = np.arange(len(traj_u))
+    steps_c = np.arange(len(traj_c))
+    
+    labels = [r'$\theta_1$', r'$\theta_2$', r'$\theta_3$']
+    colors = ['C0', 'C1', 'C2']
+    
+    for i, (label, color) in enumerate(zip(labels, colors)):
+        ax.plot(steps_u, traj_u[:, i], '--', alpha=0.5, linewidth=1.5, 
+                color=color, label=f'{label} (unc.)')
+        ax.plot(steps_c, traj_c[:, i], '-', linewidth=2, 
+                color=color, label=f'{label} (con.)')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel('Parameter value')
+    ax.legend(fontsize=7, ncol=2)
+    ax.grid(True, alpha=0.3)
+    ax.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_interaction_parameters(sol_constrained, sol_unconstrained,
+                                filename='fig_interaction_parameters.pdf'):
+    """
+    Plot θ₁₂, θ₁₃, θ₂₃ vs time for both dynamics.
+    
+    Shows how pairwise interactions evolve differently under constraint.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    traj_u = sol_unconstrained['trajectory']
+    traj_c = sol_constrained['trajectory']
+    
+    steps_u = np.arange(len(traj_u))
+    steps_c = np.arange(len(traj_c))
+    
+    labels = [r'$\theta_{12}$', r'$\theta_{13}$', r'$\theta_{23}$']
+    colors = ['C0', 'C1', 'C2']
+    
+    for i, (label, color) in enumerate(zip(labels, colors)):
+        param_idx = 3 + i  # Interaction parameters start at index 3
+        ax.plot(steps_u, traj_u[:, param_idx], '--', alpha=0.5, linewidth=1.5,
+                color=color, label=f'{label} (unc.)')
+        ax.plot(steps_c, traj_c[:, param_idx], '-', linewidth=2,
+                color=color, label=f'{label} (con.)')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel('Parameter value')
+    ax.legend(fontsize=7, ncol=2)
+    ax.grid(True, alpha=0.3)
+    ax.axhline(0, color='k', linewidth=0.5, linestyle='--', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_regime_variation(solution, N, sample_every=50,
+                          filename='fig_regime_variation.pdf'):
+    """
+    Plot ||A||/||S|| along trajectory.
+    
+    Shows transition between thermodynamic and mechanical regimes.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    # Compute regime variation
+    regime_data = compute_regime_along_trajectory(solution['trajectory'], N, sample_every)
+    
+    ax.plot(regime_data['sample_indices'], regime_data['ratios'], 
+            'g-', linewidth=2)
+    ax.set_xlabel('Time step')
+    ax.set_ylabel(r'$\|A\|/\|S\|$')
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_component_norms(solution, N, sample_every=50,
+                         filename='fig_component_norms.pdf'):
+    """
+    Plot ||S|| and ||A|| separately vs time.
+    
+    Shows absolute magnitudes, not just ratio.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    # Compute regime variation
+    regime_data = compute_regime_along_trajectory(solution['trajectory'], N, sample_every)
+    
+    ax.plot(regime_data['sample_indices'], regime_data['norms_S'], 
+            'r-', linewidth=2, label=r'$\|S\|$ (dissipative)')
+    ax.plot(regime_data['sample_indices'], regime_data['norms_A'], 
+            'b-', linewidth=2, label=r'$\|A\|$ (conservative)')
+    
+    ax.set_xlabel('Time step')
+    ax.set_ylabel('Frobenius norm')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_correlation_structure(theta, N, 
+                               filename='fig_correlation_structure.pdf'):
+    """
+    Plot correlation matrix and frustration pattern.
+    
+    Single-panel version showing just the correlation heatmap with values.
+    """
+    fig, ax = plt.subplots(figsize=(4, 3))
+    
+    # Compute correlation structure
+    corr_info = analyze_correlation_structure(theta, N)
+    corr_matrix = corr_info['correlation_matrix']
+    
+    # Heatmap
+    im = ax.imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1, aspect='auto')
+    ax.set_xticks([0, 1, 2])
+    ax.set_yticks([0, 1, 2])
+    ax.set_xticklabels([r'$X_1$', r'$X_2$', r'$X_3$'])
+    ax.set_yticklabels([r'$X_1$', r'$X_2$', r'$X_3$'])
+    
+    # Add correlation values
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                text = ax.text(j, i, f'{corr_matrix[i, j]:.2f}',
+                              ha="center", va="center", color="black", fontsize=10)
+    
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    print(f"✓ Saved: {filename}")
+    plt.close()
+
+
+def save_decomposition_table(result, filename='table_decomposition_table.txt'):
+    """
+    Generate LaTeX table code for decomposition results.
+    
+    Creates a simple table showing ||S||, ||A||, and ratio.
+    """
+    table_code = r"""\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Component & Frobenius Norm & Eigenvalue Structure \\
+\midrule
+Symmetric ($S$) & $\|S\| = %.3f$ & Real, negative (dissipation) \\
+Antisymmetric ($A$) & $\|A\| = %.3f$ & Pure imaginary (oscillation) \\
+\textbf{Ratio} & $\|A\|/\|S\| = %.2f$ & \textbf{%s} \\
+\bottomrule
+\end{tabular}
+\end{center}
+""" % (result['norm_S'], result['norm_A'], result['ratio'],
+       'Conservation-dominated' if result['ratio'] > 1 else 'Dissipation-dominated')
+    
+    with open(filename, 'w') as f:
+        f.write(table_code)
+    
+    print(f"✓ Saved: {filename}")
+
+
+# ============================================================================
+# Multi-Panel Visualization Functions (Original - for exploration)
 # ============================================================================
 
 def plot_phase_space_decomposition(result, filename='generic_n3_phase_space.pdf'):

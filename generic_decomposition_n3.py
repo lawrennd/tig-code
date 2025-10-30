@@ -195,8 +195,6 @@ def compute_constraint_gradient(theta, N):
     
     where φ_j is the j-th sufficient statistic and covariances are computed
     from the joint distribution.
-    
-    This is significantly faster and more accurate than numerical differentiation.
     """
     states = generate_states(N)
     features = compute_features_pairwise(states)

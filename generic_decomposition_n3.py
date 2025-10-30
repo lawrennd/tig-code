@@ -11,8 +11,8 @@ symmetric (dissipative) dynamics.
 
 Main Functions:
     Core Analysis:
-    analyze_generic_structure() - Compute M = S + A decomposition at a point
-    analyze_correlation_structure() - Analyze frustration patterns
+    analyse_generic_structure() - Compute M = S + A decomposition at a point
+    analyse_correlation_structure() - Analyse frustration patterns
         compute_joint_entropy_trajectory() - H(X₁,...,Xₙ) along trajectory
         compute_marginal_entropy_trajectory() - Σᵢ H(Xᵢ) along trajectory
         compute_regime_along_trajectory() - ||A||/||S|| along trajectory
@@ -55,8 +55,8 @@ Usage:
     >>> gd.save_trajectory_comparison(sol_c, sol_u)
     >>> gd.save_regime_variation(sol_c, N=3)
     
-    # Analyze at specific point
-    >>> result = gd.analyze_generic_structure(theta, N=3)
+    # Analyse at specific point
+    >>> result = gd.analyse_generic_structure(theta, N=3)
     >>> gd.save_decomposition_table(result)
 
 Dependencies:
@@ -72,16 +72,19 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.linalg import expm
 from itertools import product
 
+big_figsize = (7, 7)
+big_wide_figsize = (10, 6)
+
 # Publication-quality figure settings
 plt.rcParams.update({
-    'font.size': 10,
+    'font.size': 14,
     'font.family': 'serif',
-    'axes.labelsize': 10,
-    'axes.titlesize': 11,
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9,
-    'legend.fontsize': 9,
-    'figure.titlesize': 12
+    'axes.labelsize': 14,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 'medium',
+    'figure.titlesize': 16
 })
 
 
@@ -153,11 +156,14 @@ def marginal_entropy(p):
     return -np.sum(p_clean * np.log(p_clean))
 
 
-def compute_constraint_gradient(theta, N, eps=1e-5):
+def compute_constraint_gradient_numerical(theta, N, eps=1e-5):
     """
     Numerical gradient of total marginal entropy: ∇(∑_i H(X_i)).
     
     This is the constraint gradient a(θ) = ∇_θ C(θ).
+    
+    Use compute_constraint_gradient() for faster analytic version.
+    This is for testing/validation purposes only.
     """
     d = N + N*(N-1)//2  # Parameter dimension
     marginals, _ = compute_marginals(theta, N)
@@ -174,11 +180,72 @@ def compute_constraint_gradient(theta, N, eps=1e-5):
     return grad
 
 
+def compute_constraint_gradient(theta, N):
+    """
+    Analytic gradient of total marginal entropy: ∇(∑_i H(X_i)).
+    
+    This is the constraint gradient a(θ) = ∇_θ C(θ).
+    
+    For binary variables with marginal probabilities p_i = P(X_i = 1):
+        h_i = -p_i log p_i - (1-p_i) log(1-p_i)
+        
+    The gradient is computed using chain rule:
+        ∂h_i/∂θ_j = (∂h_i/∂p_i) · (∂p_i/∂θ_j)
+                   = log((1-p_i)/p_i) · Cov(X_i, φ_j)
+    
+    where φ_j is the j-th sufficient statistic and covariances are computed
+    from the joint distribution.
+    
+    This is significantly faster and more accurate than numerical differentiation.
+    """
+    states = generate_states(N)
+    features = compute_features_pairwise(states)
+    
+    # Compute joint distribution
+    logits = features @ theta
+    log_Z = np.logaddexp.reduce(logits)
+    probs = np.exp(logits - log_Z)
+    
+    # Marginal probabilities p_i = P(X_i = 1)
+    marginal_probs = np.array([probs[states[:, i] == 1].sum() for i in range(N)])
+    
+    # Entropy derivative: ∂h_i/∂p_i = log((1-p_i)/p_i)
+    # Handle edge cases where p_i ≈ 0 or p_i ≈ 1
+    eps = 1e-10
+    p_safe = np.clip(marginal_probs, eps, 1 - eps)
+    dh_dp = np.log((1 - p_safe) / p_safe)
+    
+    # Compute covariances: Cov(X_i, φ_j) = E[X_i · φ_j] - E[X_i] · E[φ_j]
+    # where E[X_i] = p_i and E[φ_j] = ∑_x p(x)φ_j(x)
+    
+    d = N + N*(N-1)//2
+    grad = np.zeros(d)
+    
+    # Expected values of sufficient statistics
+    E_phi = probs @ features  # E[φ_j]
+    
+    # For each variable X_i, compute covariances with all sufficient statistics
+    for i in range(N):
+        # Mask for states where X_i = 1
+        mask_i = (states[:, i] == 1)
+        
+        # E[X_i · φ_j] = ∑_{x: x_i=1} p(x)φ_j(x)
+        E_Xi_phi = probs[mask_i] @ features[mask_i]
+        
+        # Cov(X_i, φ_j) = E[X_i · φ_j] - p_i · E[φ_j]
+        cov_Xi_phi = E_Xi_phi - marginal_probs[i] * E_phi
+        
+        # Gradient contribution from variable i
+        grad += dh_dp[i] * cov_Xi_phi
+    
+    return grad
+
+
 # ============================================================================
 # GENERIC Decomposition Analysis
 # ============================================================================
 
-def analyze_generic_structure(theta, N, eps_diff=1e-5):
+def analyse_generic_structure(theta, N, eps_diff=1e-5):
     """
     Perform GENERIC decomposition of constrained information dynamics.
     
@@ -246,7 +313,7 @@ def analyze_generic_structure(theta, N, eps_diff=1e-5):
     }
 
 
-def solve_constrained_maxent(theta_init, N, n_steps=2000, dt=0.01, 
+def solve_constrained_maxent(theta_init, N, n_steps=20000, dt=0.01, 
                               convergence_tol=1e-6, verbose=False):
     """
     Solve constrained max ent dynamics via gradient descent.
@@ -352,9 +419,9 @@ def solve_constrained_maxent(theta_init, N, n_steps=2000, dt=0.01,
 # Correlation Structure Analysis
 # ============================================================================
 
-def analyze_correlation_structure(theta, N):
+def analyse_correlation_structure(theta, N):
     """
-    Analyze the correlation structure that creates strong antisymmetric flow.
+    Analyse the correlation structure that creates strong antisymmetric flow.
     
     Returns:
     - Correlation matrix
@@ -504,7 +571,7 @@ def compute_regime_along_trajectory(trajectory, N, sample_every=50):
     for idx in sample_indices:
         theta = trajectory[idx]
         try:
-            result = analyze_generic_structure(theta, N)
+            result = analyse_generic_structure(theta, N)
             ratios.append(result['ratio'])
             norms_S.append(result['norm_S'])
             norms_A.append(result['norm_A'])
@@ -532,7 +599,7 @@ def save_constraint_maintenance(solution, filename='fig_constraint_maintenance.p
     
     Shows that marginal entropy constraint is maintained during evolution.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     steps = np.arange(len(solution['constraint_values']))
     deviation = np.abs(solution['constraint_values'] - solution['C_init'])
@@ -543,10 +610,7 @@ def save_constraint_maintenance(solution, filename='fig_constraint_maintenance.p
     ax.grid(True, alpha=0.3, which='both')
     ax.axhline(1e-8, color='r', linestyle='--', linewidth=0.8, alpha=0.5)
     
-    plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_convergence(solution, filename='fig_convergence.pdf'):
@@ -555,7 +619,7 @@ def save_convergence(solution, filename='fig_convergence.pdf'):
     
     Shows convergence to stationary point where constrained flow vanishes.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     steps = np.arange(len(solution['flow_norms']))
     ax.semilogy(steps, solution['flow_norms'], 'b-', linewidth=1.5)
@@ -564,10 +628,7 @@ def save_convergence(solution, filename='fig_convergence.pdf'):
     ax.grid(True, alpha=0.3, which='both')
     ax.axhline(1e-6, color='r', linestyle='--', linewidth=0.8, alpha=0.5)
     
-    plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_trajectory_comparison(sol_constrained, sol_unconstrained, 
@@ -577,7 +638,7 @@ def save_trajectory_comparison(sol_constrained, sol_unconstrained,
     
     Shows how constraint shapes the flow in parameter space.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     traj_c = sol_constrained['trajectory']
     traj_u = sol_unconstrained['trajectory']
@@ -603,8 +664,6 @@ def save_trajectory_comparison(sol_constrained, sol_unconstrained,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_joint_entropy_evolution(sol_constrained, sol_unconstrained, N,
@@ -614,7 +673,7 @@ def save_joint_entropy_evolution(sol_constrained, sol_unconstrained, N,
     
     Shows that both increase joint entropy (second law), but at different rates.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     # Compute joint entropy for both trajectories
     steps_u, H_u = compute_joint_entropy_trajectory(sol_unconstrained['trajectory'], N, sample_every=10)
@@ -632,8 +691,6 @@ def save_joint_entropy_evolution(sol_constrained, sol_unconstrained, N,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_marginal_entropy_evolution(sol_constrained, sol_unconstrained, N,
@@ -643,7 +700,7 @@ def save_marginal_entropy_evolution(sol_constrained, sol_unconstrained, N,
     
     Shows constrained maintains constant sum, unconstrained does not.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     # Compute marginal entropy sum for both
     steps_u, sum_h_u = compute_marginal_entropy_trajectory(sol_unconstrained['trajectory'], N, sample_every=10)
@@ -659,8 +716,6 @@ def save_marginal_entropy_evolution(sol_constrained, sol_unconstrained, N,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_flow_comparison(sol_constrained, sol_unconstrained,
@@ -670,7 +725,7 @@ def save_flow_comparison(sol_constrained, sol_unconstrained,
     
     Shows different convergence rates due to constraint.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     steps_u = np.arange(len(sol_unconstrained['flow_norms']))
     steps_c = np.arange(len(sol_constrained['flow_norms']))
@@ -687,8 +742,6 @@ def save_flow_comparison(sol_constrained, sol_unconstrained,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_distance_evolution(sol_constrained, sol_unconstrained,
@@ -698,7 +751,7 @@ def save_distance_evolution(sol_constrained, sol_unconstrained,
     
     Shows convergence to origin (unconstrained) vs convergence on manifold (constrained).
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     traj_u = sol_unconstrained['trajectory']
     traj_c = sol_constrained['trajectory']
@@ -719,8 +772,6 @@ def save_distance_evolution(sol_constrained, sol_unconstrained,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_marginal_parameters(sol_constrained, sol_unconstrained,
@@ -730,7 +781,7 @@ def save_marginal_parameters(sol_constrained, sol_unconstrained,
     
     Shows how marginal bias parameters evolve differently under constraint.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     traj_u = sol_unconstrained['trajectory']
     traj_c = sol_constrained['trajectory']
@@ -755,8 +806,6 @@ def save_marginal_parameters(sol_constrained, sol_unconstrained,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_interaction_parameters(sol_constrained, sol_unconstrained,
@@ -766,7 +815,7 @@ def save_interaction_parameters(sol_constrained, sol_unconstrained,
     
     Shows how pairwise interactions evolve differently under constraint.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     traj_u = sol_unconstrained['trajectory']
     traj_c = sol_constrained['trajectory']
@@ -792,8 +841,6 @@ def save_interaction_parameters(sol_constrained, sol_unconstrained,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_regime_variation(solution, N, sample_every=50,
@@ -803,7 +850,7 @@ def save_regime_variation(solution, N, sample_every=50,
     
     Shows transition between thermodynamic and mechanical regimes.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     # Compute regime variation
     regime_data = compute_regime_along_trajectory(solution['trajectory'], N, sample_every)
@@ -816,8 +863,6 @@ def save_regime_variation(solution, N, sample_every=50,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_component_norms(solution, N, sample_every=50,
@@ -827,7 +872,7 @@ def save_component_norms(solution, N, sample_every=50,
     
     Shows absolute magnitudes, not just ratio.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     # Compute regime variation
     regime_data = compute_regime_along_trajectory(solution['trajectory'], N, sample_every)
@@ -844,8 +889,6 @@ def save_component_norms(solution, N, sample_every=50,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_correlation_structure(theta, N, 
@@ -855,10 +898,10 @@ def save_correlation_structure(theta, N,
     
     Single-panel version showing just the correlation heatmap with values.
     """
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=big_figsize)
     
     # Compute correlation structure
-    corr_info = analyze_correlation_structure(theta, N)
+    corr_info = analyse_correlation_structure(theta, N)
     corr_matrix = corr_info['correlation_matrix']
     
     # Heatmap
@@ -879,8 +922,6 @@ def save_correlation_structure(theta, N,
     
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight', dpi=300)
-    print(f"✓ Saved: {filename}")
-    plt.close()
 
 
 def save_decomposition_table(result, filename='table_decomposition_table.txt'):
@@ -1150,7 +1191,7 @@ def plot_constrained_trajectory(solution, theta_final,
     print(f"✓ Saved: {filename}")
 
 
-def solve_unconstrained_maxent(theta_init, N, n_steps=2000, dt=0.01,
+def solve_unconstrained_maxent(theta_init, N, n_steps=20000, dt=0.01,
                                 convergence_tol=1e-6, verbose=False):
     """
     Solve pure (unconstrained) max ent dynamics via gradient ascent.
@@ -1534,7 +1575,7 @@ def temperature_scaling_experiment(theta_base, N, beta_values=None,
     for beta in beta_values:
         theta_scaled = beta * theta_base
         try:
-            result = analyze_generic_structure(theta_scaled, N)
+            result = analyse_generic_structure(theta_scaled, N)
             ratio = result['ratio']
             ratio_values.append(ratio)
             norm_S_values.append(result['norm_S'])

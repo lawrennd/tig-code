@@ -492,12 +492,89 @@ def compute_jacobian_numerical(theta, eps=1e-5):
     return M
 
 
-def simulate_dynamics(theta_init, tau_span, dtau=0.01):
+def project_onto_constraint(theta, C_target, max_iter=10, tol=1e-12):
+    """
+    Project θ onto constraint manifold h(X) + h(P) = C_target.
+    
+    Uses Newton's method to adjust θ along the constraint gradient
+    direction until the constraint is satisfied.
+    
+    Parameters
+    ----------
+    theta : array_like
+        Current parameter vector
+    C_target : float
+        Target constraint value
+    max_iter : int
+        Maximum number of Newton iterations (default: 10)
+    tol : float
+        Tolerance for constraint satisfaction (default: 1e-12)
+    
+    Returns
+    -------
+    theta_projected : ndarray
+        Projected parameter vector, or None if projection fails
+    """
+    theta = theta.copy()
+    
+    for i in range(max_iter):
+        # Compute current constraint value
+        h_X, h_P, C_current = marginal_entropies(theta)
+        if h_X is None:
+            return None
+        
+        error = C_current - C_target
+        
+        # Check convergence
+        if abs(error) < tol:
+            return theta
+        
+        # Compute constraint gradient
+        a = constraint_gradient(theta)
+        if a is None:
+            return None
+        
+        # Newton step: θ ← θ - (error / ||a||²) · a
+        # This moves θ along the constraint gradient to reduce error
+        step_size = error / np.dot(a, a)
+        theta = theta - step_size * a
+    
+    # If we didn't converge, return None
+    return None
+
+
+def simulate_dynamics(theta_init, tau_span, dtau=0.01, project=True, project_tol=1e-12):
     """
     Simulate constrained dynamics: dθ/dt = F(θ).
     
-    Returns:
-        $\tau$s, trajectory, constraint_values, energies
+    Parameters
+    ----------
+    theta_init : array_like
+        Initial parameter vector [θ_xx, θ_pp, θ_xp]
+    tau_span : float
+        Total integration time
+    dtau : float
+        Time step (default: 0.01)
+    project : bool
+        If True, project back onto constraint manifold after each step
+        to prevent constraint drift (default: True)
+    project_tol : float
+        Tolerance for constraint projection (default: 1e-12)
+    
+    Returns
+    -------
+    tau_vals : ndarray
+        Time points
+    trajectory : ndarray
+        Parameter trajectory (n_steps × 3)
+    constraint_vals : ndarray
+        Constraint values at each time point
+    
+    Notes
+    -----
+    Without projection, constraint drift accumulates as O(√N) due to
+    numerical integration errors. With projection, constraint is
+    preserved to machine precision.
     """
     tau_vals = np.arange(0, tau_span, dtau)
     trajectory = [theta_init.copy()]
@@ -517,6 +594,14 @@ def simulate_dynamics(theta_init, tau_span, dtau=0.01):
         
         # Euler step
         theta = theta + dtau * F
+        
+        # Project back onto constraint manifold
+        if project:
+            theta_projected = project_onto_constraint(theta, C_init, tol=project_tol)
+            if theta_projected is None:
+                print("Warning: Projection failed")
+                break
+            theta = theta_projected
         
         trajectory.append(theta.copy())
         

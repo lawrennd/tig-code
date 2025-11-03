@@ -243,6 +243,56 @@ def compute_constraint_gradient(theta, N):
 # GENERIC Decomposition Analysis
 # ============================================================================
 
+def project_onto_constraint(theta, N, C_target, max_iter=10, tol=1e-12):
+    """
+    Project θ onto constraint manifold Σᵢ H(Xᵢ) = C_target.
+    
+    Uses Newton's method to adjust θ along the constraint gradient
+    direction until the constraint is satisfied.
+    
+    Parameters
+    ----------
+    theta : array_like
+        Current parameter vector
+    N : int
+        Number of binary variables
+    C_target : float
+        Target constraint value
+    max_iter : int
+        Maximum number of Newton iterations (default: 10)
+    tol : float
+        Tolerance for constraint satisfaction (default: 1e-12)
+    
+    Returns
+    -------
+    theta_projected : ndarray
+        Projected parameter vector, or None if projection fails
+    """
+    theta = theta.copy()
+    
+    for i in range(max_iter):
+        # Compute current constraint value
+        marginals, _ = compute_marginals(theta, N)
+        C_current = sum(marginal_entropy(m) for m in marginals)
+        
+        error = C_current - C_target
+        
+        # Check convergence
+        if abs(error) < tol:
+            return theta
+        
+        # Compute constraint gradient
+        a = compute_constraint_gradient(theta, N)
+        
+        # Newton step: θ ← θ - (error / ||a||²) · a
+        # This moves θ along the constraint gradient to reduce error
+        step_size = error / np.dot(a, a)
+        theta = theta - step_size * a
+    
+    # If we didn't converge, return None
+    return None
+
+
 def analyse_generic_structure(theta, N, eps_diff=1e-5):
     """
     Perform GENERIC decomposition of constrained information dynamics.
@@ -312,7 +362,8 @@ def analyse_generic_structure(theta, N, eps_diff=1e-5):
 
 
 def solve_constrained_maxent(theta_init, N, n_steps=20000, dt=0.01, 
-                              convergence_tol=1e-6, verbose=False):
+                              convergence_tol=1e-6, project=True, project_tol=1e-12,
+                              verbose=False):
     """
     Solve constrained max ent dynamics via gradient descent.
     
@@ -333,6 +384,11 @@ def solve_constrained_maxent(theta_init, N, n_steps=20000, dt=0.01,
         Step size for gradient descent
     convergence_tol : float
         Stop when ||F|| < convergence_tol
+    project : bool
+        If True, project back onto constraint manifold after each step
+        to prevent constraint drift (default: True)
+    project_tol : float
+        Tolerance for constraint projection (default: 1e-12)
     verbose : bool
         Print progress information
         
@@ -347,6 +403,12 @@ def solve_constrained_maxent(theta_init, N, n_steps=20000, dt=0.01,
             Σᵢ H(Xᵢ) at each step (should be approximately constant)
         converged : bool
             Whether convergence criterion was met
+            
+    Notes
+    -----
+    Without projection, constraint drift accumulates as O(√N) due to
+    numerical integration errors. With projection, constraint is
+    preserved to machine precision.
     """
     d = N + N*(N-1)//2
     trajectory = [theta_init.copy()]
@@ -371,6 +433,15 @@ def solve_constrained_maxent(theta_init, N, n_steps=20000, dt=0.01,
         
         # Gradient descent step
         theta = theta + dt * F
+        
+        # Project back onto constraint manifold
+        if project:
+            theta_projected = project_onto_constraint(theta, N, C_init, tol=project_tol)
+            if theta_projected is None:
+                if verbose:
+                    print(f"Warning: Projection failed at step {step}")
+                break
+            theta = theta_projected
         
         # Track metrics
         flow_norm = np.linalg.norm(F)

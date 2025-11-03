@@ -236,7 +236,7 @@ def joint_entropy_curie_weiss_exact(m, n):
 
 def partition_function_exact(beta, J, h, n):
     """
-    **EXACT** partition function for Curie-Weiss model (no approximations).
+    Partition function for Curie-Weiss model (no approximations).
     
     Key insight: Energy depends only on total magnetisation M = Σᵢ xᵢ:
         E(M) = -J*M²/(2n) - h*M
@@ -264,18 +264,12 @@ def partition_function_exact(beta, J, h, n):
     
     Returns:
     --------
-    Z : float
-        Partition function (exact)
     log_Z : float
-        Log partition function (more numerically stable)
+        Log partition function (numerically stable, no overflow for large n)
     
     Computational limits:
     ---------------------
-    ✓ Recommended: n ≤ 15 (fast, < 1 second)
-    ✓ Feasible: n ≤ 20 (manageable)
-    ✗ Not recommended: n > 20 (binomial coefficients become large)
-    
-    For n > 20: Use mean-field approximation with caution about regime validity
+    This function is O(n) complexity due to form of Curie-Weiss energy.
     
     See also:
     ---------
@@ -305,7 +299,7 @@ def partition_function_exact(beta, J, h, n):
     log_boltzmann = -beta * energies + log_degeneracies
     log_Z = logsumexp(log_boltzmann)
     
-    return np.exp(log_Z), log_Z
+    return log_Z
 
 
 def exact_expectation_energy(beta, J, h, n):
@@ -343,7 +337,7 @@ def exact_expectation_energy(beta, J, h, n):
     
     # Boltzmann weights
     log_boltzmann = -beta * energies + log_degeneracies
-    _, log_Z = partition_function_exact(beta, J, h, n)
+    log_Z = partition_function_exact(beta, J, h, n)
     
     # Probabilities
     log_probs = log_boltzmann - log_Z
@@ -392,7 +386,7 @@ def exact_expectation_magnetisation(beta, J, h, n):
     
     # Boltzmann weights
     log_boltzmann = -beta * energies + log_degeneracies
-    _, log_Z = partition_function_exact(beta, J, h, n)
+    log_Z = partition_function_exact(beta, J, h, n)
     
     # Probabilities
     log_probs = log_boltzmann - log_Z
@@ -452,7 +446,7 @@ def exact_joint_entropy_canonical(beta, J, h, n):
     >>> # Gaussian regime: accurate mean-field
     >>> H_mf = joint_entropy_curie_weiss(1.0, 1.0, 0.3, 10)
     """
-    _, log_Z = partition_function_exact(beta, J, h, n)
+    log_Z = partition_function_exact(beta, J, h, n)
     E_mean = exact_expectation_energy(beta, J, h, n)
     
     H = log_Z + beta * E_mean

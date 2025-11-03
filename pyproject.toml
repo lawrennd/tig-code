@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "the-inaccessible-game"
+version = "0.1.0"
+description = "Information-theoretic foundations for thermodynamic-like dynamics"
+authors = ["Neil D. Lawrence <lawrennd@gmail.com>"]
+readme = "README.md"
+packages = []
+
+[tool.poetry.dependencies]
+python = "^3.9"
+numpy = ">=1.20.0"
+scipy = ">=1.7.0"
+matplotlib = ">=3.3.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

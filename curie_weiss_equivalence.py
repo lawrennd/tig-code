@@ -661,13 +661,30 @@ def multi_information_curie_weiss(beta, J, m, n=1.0):
 # Gradient Computations
 # ============================================================================
 
-def gradient_energy_wrt_m(J, h, m):
+def gradient_energy_wrt_m(J, h, m, n=1.0):
     """
-    ∇_m ⟨E⟩ = ∇_m(-Jm²/2 - hm) = -Jm - h
+    ∇_m E = ∇_m(-n*J*m²/2 - n*h*m) = -n*J*m - n*h
     
-    For Curie-Weiss: E(m) = -J*m²/2 - h*m
+    For Curie-Weiss total energy: E = -n*J*m²/2 - n*h*m
+    Per spin energy: E/n = -J*m²/2 - h*m
+    
+    Parameters:
+    -----------
+    J : float
+        Coupling strength
+    h : float
+        External field
+    m : float
+        Magnetization per spin
+    n : float, optional
+        Number of spins (default 1.0). Use n>1 for total system gradient.
+    
+    Returns:
+    --------
+    grad : float
+        ∇_m E (scaled by n for total system)
     """
-    return -J * m - h
+    return -n * (J * m + h)
 
 
 def gradient_marginal_entropy_wrt_m(m, n=1.0):
@@ -1012,7 +1029,7 @@ def implied_alpha_from_constraints(beta, J, h, n, dh=1e-6):
     m = exact_expectation_magnetisation(beta, J, h, n)
     
     # Energy direction (defines α_energy)
-    grad_E = gradient_energy_wrt_m(J, h, m)
+    grad_E = gradient_energy_wrt_m(J, h, m, n)  # Include n for total system
     alpha_energy = -grad_E  # α_energy ∝ -∇E
     
     # Exact gradient of multi-information

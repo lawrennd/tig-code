@@ -63,7 +63,7 @@ def marginal_entropy(m, n=1.0):
 
 def partition_function_exact(beta, J, h, n):
     """
-    Partition function for Curie-Weiss model (no approximations).
+    Partition function for Curie-Weiss model.
     
     Key insight: Energy depends only on total magnetisation M = Σᵢ xᵢ:
         E(M) = -J*M²/(2n) - h*M

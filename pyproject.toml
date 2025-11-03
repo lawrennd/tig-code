@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Information-theoretic foundations for thermodynamic-like dynamics"
 authors = ["Neil D. Lawrence <lawrennd@gmail.com>"]
 readme = "README.md"
-packages = []
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.9"

@@ -24,11 +24,19 @@ from scipy.special import erf, comb, logsumexp
 
 def curie_weiss_magnetisation(beta, J, h, m_init=None):
     """
-    Solve self-consistency equation: m = tanh(β(Jm + h))
+    **MEAN-FIELD** magnetisation via self-consistency: m = tanh(β(Jm + h))
     
-    For h=0 and β > β_c = 1/J, there are three solutions:
-    - m = 0 (unstable)
-    - m = ±m* (stable, ferromagnetic)
+    Approximation:
+        - Assumes each spin sees mean-field from all others
+        - Valid in thermodynamic limit (n → ∞)
+        - Neglects fluctuations beyond mean
+    
+    Phase behavior:
+        T > T_c (β < 1/J, h=0): m = 0 (paramagnetic)
+        T < T_c (β > 1/J, h=0): m = ±m* (ferromagnetic, spontaneous breaking)
+        T < T_c (β > 1/J, h≠0): m ≠ 0 (selected by field)
+    
+    Critical point: T_c = J (or β_c = 1/J)
     
     Parameters:
     -----------
@@ -44,7 +52,24 @@ def curie_weiss_magnetisation(beta, J, h, m_init=None):
     Returns:
     --------
     m : float
-        Self-consistent magnetisation (stable solution)
+        Self-consistent magnetisation (mean-field solution)
+    
+    When to use:
+    ------------
+    ✓ Large systems (n > 20) where exact computation infeasible
+    ✓ Understanding thermodynamic behavior and phase transitions
+    ✓ Qualitative analysis of ordered/disordered regimes
+    ✗ Quantitative predictions for small n (use exact_expectation_magnetisation)
+    
+    Important caveat:
+    -----------------
+    For finite n with h=0, exact canonical ensemble gives ⟨m⟩ = 0 by symmetry,
+    but mean-field shows spontaneous symmetry breaking. This is a well-known
+    artifact of the thermodynamic limit - use small h ≠ 0 for finite systems.
+    
+    See also:
+    ---------
+    exact_expectation_magnetisation() - exact ⟨m⟩ for n ≤ 20
     """
     def self_consistency(m):
         return m - np.tanh(beta * (J * m + h))
@@ -113,7 +138,28 @@ def marginal_entropy(m, n=1.0):
     """
     Marginal entropy h(X) for binary variable with magnetiation m.
     
-    h(X) = -[(1+m)/2]*log[(1+m)/2] - [(1-m)/2]*log[(1-m)/2]
+    Formula:
+        h(X) = -[(1+m)/2]*log[(1+m)/2] - [(1-m)/2]*log[(1-m)/2]
+    
+    This is the exact binary entropy function - no approximations.
+    
+    Parameters:
+    -----------
+    m : float
+        Magnetization per spin, |m| <= 1
+    n : float, optional
+        Number of spins (default 1.0, scales linearly)
+    
+    Returns:
+    --------
+    h : float
+        Marginal entropy (exact)
+    
+    When to use:
+    ------------
+    - Always valid for computing binary entropy given magnetisation
+    - Use with exact ⟨m⟩ from exact_expectation_magnetisation()
+    - Or with mean-field m from curie_weiss_magnetisation()
     """
 
     if abs(m) >= 1.0:
@@ -123,7 +169,7 @@ def marginal_entropy(m, n=1.0):
 
 def microcanonical_entropy(m, n):
     """
-    Compute log(Omega(m)) for magnetization m with n spins.
+    Compute log(Omega(m)) for magnetisation m with n spins.
     s(m) = -(1+m)/2 * log((1+m)/2) - (1-m)/2 * log((1-m)/2)
     """
     if abs(m) > 1:
@@ -145,9 +191,9 @@ def microcanonical_entropy(m, n):
 
 def joint_entropy_curie_weiss_exact(m, n):
     """
-    Compute exact microcanonical joint entropy at fixed magnetization m.
+    Compute exact microcanonical joint entropy at fixed magnetisation m.
     
-    This is the entropy of configurations with total magnetization M = n*m:
+    This is the entropy of configurations with total magnetisation M = n*m:
         H(s | M) = log Ω(M) = log C(n, k)
     where k = (n + M)/2 is the number of up spins.
     
@@ -163,7 +209,7 @@ def joint_entropy_curie_weiss_exact(m, n):
     S : float
         Microcanonical joint entropy (total, not per spin)
     """
-    # Total magnetization
+    # Total magnetisation
     M = n * m
     
     # Number of up spins
@@ -190,15 +236,20 @@ def joint_entropy_curie_weiss_exact(m, n):
 
 def partition_function_exact(beta, J, h, n):
     """
-    Compute exact partition function for Curie-Weiss model.
+    **EXACT** partition function for Curie-Weiss model (no approximations).
     
-    Exploits the fact that energy only depends on total magnetization M:
+    Key insight: Energy depends only on total magnetisation M = Σᵢ xᵢ:
         E(M) = -J*M²/(2n) - h*M
     
-    So we sum over magnetizations rather than all 2^n configurations:
-        Z = Σ_M Ω(M) exp(-β E(M))
+    Therefore, we sum over O(n) magnetisation values, not O(2^n) configurations:
+        Z = Σ_{M=-n}^{n} Ω(M) exp(-β E(M))
     
-    where Ω(M) = C(n, (n+M)/2) is the degeneracy.
+    where Ω(M) = C(n, (n+M)/2) is the degeneracy (binomial coefficient).
+    
+    Computational complexity:
+        - O(n) evaluations (2n+1 magnetisation states)
+        - No approximations whatsoever
+        - Numerically stable via logsumexp
     
     Parameters:
     -----------
@@ -209,21 +260,35 @@ def partition_function_exact(beta, J, h, n):
     h : float
         External field
     n : int
-        Number of spins (should be reasonably small, e.g., n <= 20)
+        Number of spins
     
     Returns:
     --------
     Z : float
-        Partition function
+        Partition function (exact)
     log_Z : float
         Log partition function (more numerically stable)
+    
+    Computational limits:
+    ---------------------
+    ✓ Recommended: n ≤ 15 (fast, < 1 second)
+    ✓ Feasible: n ≤ 20 (manageable)
+    ✗ Not recommended: n > 20 (binomial coefficients become large)
+    
+    For n > 20: Use mean-field approximation with caution about regime validity
+    
+    See also:
+    ---------
+    - exact_expectation_energy() - exact ⟨E⟩
+    - exact_joint_entropy_canonical() - exact H
+    - exact_multi_information_canonical() - exact I
     """
     n = int(n)
     
-    # All possible total magnetizations: M ∈ {-n, -n+2, ..., n-2, n}
+    # All possible total magnetisations: M ∈ {-n, -n+2, ..., n-2, n}
     M_values = np.arange(-n, n + 1, 2)
     
-    # Energy for each magnetization
+    # Energy for each magnetisation
     # E(M) = -J*M²/(2n) - h*M
     energies = -J * M_values**2 / (2 * n) - h * M_values
     
@@ -290,9 +355,9 @@ def exact_expectation_energy(beta, J, h, n):
     return E_mean
 
 
-def exact_expectation_magnetization(beta, J, h, n):
+def exact_expectation_magnetisation(beta, J, h, n):
     """
-    Compute exact expectation of magnetization per spin: ⟨m⟩ = ⟨M⟩/n
+    Compute exact expectation of magnetisation per spin: ⟨m⟩ = ⟨M⟩/n
     
     Parameters:
     -----------
@@ -308,7 +373,7 @@ def exact_expectation_magnetization(beta, J, h, n):
     Returns:
     --------
     m_mean : float
-        Expectation value of magnetization per spin
+        Expectation value of magnetisation per spin
     """
     n = int(n)
     M_values = np.arange(-n, n + 1, 2)
@@ -342,9 +407,12 @@ def exact_expectation_magnetization(beta, J, h, n):
 
 def exact_joint_entropy_canonical(beta, J, h, n):
     """
-    Compute exact canonical joint entropy: H = log(Z) + β⟨E⟩
+    **EXACT** canonical joint entropy H = log(Z) + β⟨E⟩ (no approximations).
     
-    This is the Shannon entropy of the full joint distribution p(x₁,...,xₙ).
+    This is the true Shannon entropy of the full joint distribution p(x₁,...,xₙ):
+        H = -Σ p(x₁,...,xₙ) log p(x₁,...,xₙ)
+    
+    Computed via exact partition function (O(n) complexity, not O(2^n)).
     
     Parameters:
     -----------
@@ -360,7 +428,29 @@ def exact_joint_entropy_canonical(beta, J, h, n):
     Returns:
     --------
     H : float
-        Joint entropy (total, not per spin)
+        Joint entropy (total, not per spin) - exact value
+    
+    Properties:
+    -----------
+    - Always non-negative: H ≥ 0
+    - Maximum at high T: H → n*log(2) as β → 0
+    - Minimum at low T: H → 0 as β → ∞ (with h ≠ 0)
+    - For h = 0: H → log(2) at T → 0 (ground state degeneracy)
+    
+    Computational limits:
+    ---------------------
+    ✓ n ≤ 20 (exact computation feasible)
+    ✗ n > 20 (use mean-field joint_entropy_curie_weiss() with caution)
+    
+    Compare to:
+    -----------
+    joint_entropy_curie_weiss() - mean-field approximation (can fail badly)
+    
+    Example:
+    --------
+    >>> H_exact = exact_joint_entropy_canonical(1.0, 1.0, 0.1, 10)
+    >>> # Gaussian regime: accurate mean-field
+    >>> H_mf = joint_entropy_curie_weiss(1.0, 1.0, 0.3, 10)
     """
     _, log_Z = partition_function_exact(beta, J, h, n)
     E_mean = exact_expectation_energy(beta, J, h, n)
@@ -396,7 +486,7 @@ def exact_marginal_entropy_canonical(beta, J, h, n):
     """
     # Due to symmetry, all spins have identical marginals
     # p(x₁ = +1) = ⟨(1 + x₁)/2⟩ = (1 + ⟨m⟩)/2
-    m_mean = exact_expectation_magnetization(beta, J, h, n)
+    m_mean = exact_expectation_magnetisation(beta, J, h, n)
     
     # Binary entropy
     h_marginal = marginal_entropy(m_mean, n=1.0)
@@ -406,9 +496,13 @@ def exact_marginal_entropy_canonical(beta, J, h, n):
 
 def exact_multi_information_canonical(beta, J, h, n):
     """
-    Compute exact multi-information: I = Σᵢ h(Xᵢ) - H(X₁,...,Xₙ)
+    **EXACT** multi-information I = Σᵢ h(Xᵢ) - H(X₁,...,Xₙ) (no approximations).
     
-    This measures the total correlation in the system.
+    Multi-information quantifies total correlation in the system:
+        I = 0: spins are independent
+        I > 0: correlations present (joint entropy < sum of marginals)
+    
+    Computed using exact partition function (O(n) complexity).
     
     Parameters:
     -----------
@@ -424,7 +518,36 @@ def exact_multi_information_canonical(beta, J, h, n):
     Returns:
     --------
     I : float
-        Multi-information (total correlation)
+        Multi-information (exact, total not per spin)
+    
+    Properties:
+    -----------
+    - Always non-negative: I ≥ 0 (information inequality)
+    - I = 0 at high T: spins nearly independent
+    - I grows at low T: strong correlations emerge
+    - I maximal near critical point (diverging correlations)
+    
+    Key theorem diagnostic:
+    ----------------------
+    The gradient ∇_m I determines energy-entropy equivalence:
+        - |∇I| ≈ 0 (small): equivalence HOLDS
+        - |∇I| ≫ 0 (large): equivalence BREAKS
+    
+    Computational limits:
+    ---------------------
+    ✓ n ≤ 20 (exact computation feasible)
+    ✗ n > 20 (use multi_information_curie_weiss() - but can fail!)
+    
+    Compare to:
+    -----------
+    multi_information_curie_weiss() - mean-field (can be negative! unphysical)
+    
+    Example:
+    --------
+    >>> # Gaussian regime (small I, small ∇I)
+    >>> I_gauss = exact_multi_information_canonical(0.5, 1.0, 0.05, 10)
+    >>> # Ordered phase (large I, large ∇I)  
+    >>> I_order = exact_multi_information_canonical(2.0, 1.0, 0.1, 10)
     """
     H_joint = exact_joint_entropy_canonical(beta, J, h, n)
     h_marginal = exact_marginal_entropy_canonical(beta, J, h, n)
@@ -437,12 +560,44 @@ def exact_multi_information_canonical(beta, J, h, n):
 
 def joint_entropy_curie_weiss(beta, J, m, n=1.0):
     """
-    Joint entropy H for N-spin Curie-Weiss model at fixed magnetization m.
+    **APPROXIMATE** joint entropy H using mean-field theory.
     
-    Uses mean-field approximation: H ≈ h(m) - β²J²m²/2 (Gaussian fluctuations)
+    Approximation:
+        H ≈ n*h(m) - I_mf
+    where I_mf uses Gaussian fluctuation/susceptibility approximation.
     
-    This approximation captures the temperature-dependent correlations that
-    are relevant for testing the energy-entropy equivalence theorem.
+    Assumes:
+    --------
+    1. Gaussian fluctuations around mean-field solution
+    2. Susceptibility χ = 1/(1 - βJ) captures correlations
+    3. Valid in thermodynamic limit (n → ∞)
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    m : float
+        Magnetization per spin
+    n : float, optional
+        Number of spins (default 1.0)
+    
+    Returns:
+    --------
+    H : float
+        Joint entropy (mean-field approximation)
+    
+    When to use:
+    ------------
+    ✓ High temperature (T > T_c = J)
+    ✓ Small magnetisation (|m| < 0.3)
+    ✓ Large system size (n > 20)
+    ✗ Near critical point (β ≈ 1/J) - diverges
+    ✗ Ordered phase (T < T_c, large |m|) - can give negative H!
+    
+    For exact computation (n ≤ 20):
+        Use exact_joint_entropy_canonical() instead
     """
     # Mean-field approximation
     h_m = marginal_entropy(m, n)
@@ -452,11 +607,50 @@ def joint_entropy_curie_weiss(beta, J, m, n=1.0):
 
 def multi_information_curie_weiss(beta, J, m, n=1.0):
     """
-    Multi-information I = Σh_i(m) - H
+    **APPROXIMATE** multi-information using mean-field/Gaussian theory.
     
-    For Curie-Weiss mean-field: I ≈ β²J²nm²/(1-βJ) (Gaussian fluctuations)
+    Approximation:
+        I ≈ (n β² J² m²/2) / (1 - βJ)
     
-    This captures the temperature-dependent correlations that grow as T → T_c.
+    This is the susceptibility-corrected correlation term, assuming:
+    - Gaussian fluctuations around mean-field
+    - Correlations scale with susceptibility χ = 1/(1 - βJ)
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    m : float
+        Magnetization per spin
+    n : float, optional
+        Number of spins (default 1.0)
+    
+    Returns:
+    --------
+    I : float
+        Multi-information (mean-field approximation)
+    
+    When to use:
+    ------------
+    ✓ High temperature (T > T_c = J) - small correlations
+    ✓ Small magnetisation (|m| < 0.3)
+    ✓ Large system size (n > 20)
+    ✗ Near critical point (β ≈ 1/J) - diverges!
+    ✗ Ordered phase - can give large negative I (unphysical)
+    
+    Warning:
+    --------
+    - Diverges as β → 1/J (critical point)
+    - Can be negative in ordered phase (approximation failure)
+    - Use exact_multi_information_canonical() for n ≤ 20
+    
+    Physical interpretation:
+    ------------------------
+    I measures total correlation: I = Σh_i - H
+    - I = 0: independent spins
+    - I > 0: correlations reduce joint entropy below product of marginals
     """
     # Correlation correction (Gaussian fluctuations)
     correlation_term = n*(beta * J * m)**2 / 2
@@ -495,9 +689,46 @@ def gradient_joint_entropy_wrt_m(beta, J, m, n=1.0):
 
 def gradient_multi_info_wrt_m(beta, J, m, n=1.0):
     """
-    ∇_m I = ∇_m h(m) - ∇_m H
+    **APPROXIMATE** gradient of multi-information wrt magnetisation.
     
-    This should be ≈ 0 in the Gaussian regime (equivalence holds)
+    Uses mean-field/susceptibility approximation:
+        ∇_m I ≈ n β² J² m / (1 - βJ)
+    
+    This is the **key diagnostic** for energy-entropy equivalence theorem:
+        - |∇_m I| ≈ 0: Gaussian regime → equivalence HOLDS
+        - |∇_m I| ≫ 0: Ordered phase → equivalence BREAKS
+    
+    Approximation:
+        - Derived from mean-field I = (n β² J² m²/2) / (1 - βJ)
+        - Assumes Gaussian fluctuations
+        - Diverges at critical point (β → 1/J)
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    m : float
+        Magnetization per spin
+    n : float, optional
+        Number of spins (default 1.0)
+    
+    Returns:
+    --------
+    grad_I : float
+        ∇_m I (mean-field approximation)
+    
+    When to use:
+    ------------
+    ✓ Qualitative understanding of regime (Gaussian vs ordered)
+    ✓ As diagnostic with exact ⟨m⟩ from exact_expectation_magnetisation
+    ✗ Quantitative gradients in ordered phase (approximation poor)
+    
+    Physical interpretation:
+    ------------------------
+    Small |∇I|: Changing m doesn't change correlations much → Gaussian
+    Large |∇I|: Changing m strongly affects correlations → Non-Gaussian
     """
     threshold = 1e-4
     # Correlation correction
@@ -509,16 +740,56 @@ def gradient_multi_info_wrt_m(beta, J, m, n=1.0):
 
 def constraint_gradient_angle(beta, J, m, n=1.0):
     """
-    Compute relative misalignment between constraint gradients.
+    **DIAGNOSTIC** angle between energy and marginal entropy constraint gradients.
     
-    The theorem states: ∇(Σh_i) = ∇H + ∇I
+    Measures misalignment caused by correlations (∇I term):
+        θ = arctan(|∇_m I| / |∇_m H|)
     
-    When ∇I ≈ 0, we have ∇(Σh_i) ≈ ∇H ∝ ∇E (equivalence holds)
+    Physical meaning:
+        - θ ≈ 0°: Constraints aligned → energy conservation ≈ entropy conservation
+        - θ ≈ 90°: Constraints orthogonal → different natural parameters
     
-    We measure the "angle" as the relative contribution of ∇I:
-        θ = arctan(|∇I| / |∇H|)
+    Theorem connection:
+        ∇(Σh_i) = ∇H + ∇I
     
-    This is dimensionless and captures when correlations break equivalence.
+    When ∇I ≈ 0 (Gaussian): angle small, equivalence holds
+    When ∇I ≫ 0 (ordered): angle large, equivalence breaks
+    
+    Uses: **APPROXIMATE** ∇I from mean-field theory
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    m : float
+        Magnetization per spin (use exact value for best results)
+    n : float, optional
+        Number of spins (default 1.0)
+    
+    Returns:
+    --------
+    angle : float
+        Angle in degrees [0°, 90°)
+    
+    Interpretation guide:
+    ---------------------
+    angle < 10°: Strong equivalence (Gaussian regime)
+    10° < angle < 30°: Transition regime
+    angle > 30°: Equivalence broken (ordered phase)
+    
+    Typical values:
+    ---------------
+    High T (β = 0.5, m = 0.05): angle ≈ 18° ✓ equivalence
+    Low T  (β = 2.0, m = 0.9):  angle ≈ 61° ✗ no equivalence
+    
+    Example:
+    --------
+    >>> # Use with exact magnetisation for validation
+    >>> m_exact = exact_expectation_magnetisation(0.5, 1.0, 0.05, 10)
+    >>> angle = constraint_gradient_angle(0.5, 1.0, m_exact)
+    >>> print(f"Angle: {angle:.1f}° - Gaussian" if angle < 20 else f"Angle: {angle:.1f}° - Ordered")
     """
     grad_H = gradient_joint_entropy_wrt_m(beta, J, m, n)
     grad_I = gradient_multi_info_wrt_m(beta, J, m, n)

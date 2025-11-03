@@ -15,7 +15,7 @@ The Curie-Weiss model is ideal because:
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve, brentq
-from scipy.special import erf
+from scipy.special import erf, comb, logsumexp
 
 
 # ============================================================================
@@ -121,13 +121,330 @@ def marginal_entropy(m, n=1.0):
     return -n*((1+m)/2) * np.log((1+m)/2 + 1e-10) - n*((1-m)/2) * np.log((1-m)/2 + 1e-10)
 
 
+def microcanonical_entropy(m, n):
+    """
+    Compute log(Omega(m)) for magnetization m with n spins.
+    s(m) = -(1+m)/2 * log((1+m)/2) - (1-m)/2 * log((1-m)/2)
+    """
+    if abs(m) > 1:
+        return -np.inf
+    
+    # Use Stirling approximation for large n
+    if abs(m - 1) < 1e-10:  # m = 1
+        return 0
+    elif abs(m + 1) < 1e-10:  # m = -1
+        return 0
+    else:
+        s = 0
+        if 1 + m > 0:
+            s -= (1 + m) / 2 * np.log((1 + m) / 2)
+        if 1 - m > 0:
+            s -= (1 - m) / 2 * np.log((1 - m) / 2)
+        return n * s
+
+
+def joint_entropy_curie_weiss_exact(m, n):
+    """
+    Compute exact microcanonical joint entropy at fixed magnetization m.
+    
+    This is the entropy of configurations with total magnetization M = n*m:
+        H(s | M) = log Ω(M) = log C(n, k)
+    where k = (n + M)/2 is the number of up spins.
+    
+    Parameters:
+    -----------
+    m : float
+        Magnetization per spin (must satisfy |m| <= 1 and n*m is even)
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    S : float
+        Microcanonical joint entropy (total, not per spin)
+    """
+    # Total magnetization
+    M = n * m
+    
+    # Number of up spins
+    k = int((n + M) / 2 + 0.5)  # Round to nearest integer
+    
+    # Check validity
+    if k < 0 or k > n:
+        return -np.inf
+    
+    # Microcanonical entropy: log of number of configurations
+    if n <= 100:
+        # Use exact combinatorics for small n
+        S = np.log(comb(int(n), k, exact=True))
+    else:
+        # Use Stirling approximation for large n
+        S = microcanonical_entropy(m, n)
+    
+    return S
+
+
+# ============================================================================
+# Exact Canonical Ensemble Computation (Efficient for Curie-Weiss)
+# ============================================================================
+
+def partition_function_exact(beta, J, h, n):
+    """
+    Compute exact partition function for Curie-Weiss model.
+    
+    Exploits the fact that energy only depends on total magnetization M:
+        E(M) = -J*M²/(2n) - h*M
+    
+    So we sum over magnetizations rather than all 2^n configurations:
+        Z = Σ_M Ω(M) exp(-β E(M))
+    
+    where Ω(M) = C(n, (n+M)/2) is the degeneracy.
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins (should be reasonably small, e.g., n <= 20)
+    
+    Returns:
+    --------
+    Z : float
+        Partition function
+    log_Z : float
+        Log partition function (more numerically stable)
+    """
+    n = int(n)
+    
+    # All possible total magnetizations: M ∈ {-n, -n+2, ..., n-2, n}
+    M_values = np.arange(-n, n + 1, 2)
+    
+    # Energy for each magnetization
+    # E(M) = -J*M²/(2n) - h*M
+    energies = -J * M_values**2 / (2 * n) - h * M_values
+    
+    # Log degeneracy: log Ω(M) = log C(n, k) where k = (n+M)/2
+    log_degeneracies = np.zeros_like(M_values, dtype=float)
+    for i, M in enumerate(M_values):
+        k = (n + M) // 2
+        if 0 <= k <= n:
+            log_degeneracies[i] = np.log(comb(n, k, exact=False))
+        else:
+            log_degeneracies[i] = -np.inf
+    
+    # Compute log(partition function) using logsumexp for numerical stability
+    log_boltzmann = -beta * energies + log_degeneracies
+    log_Z = logsumexp(log_boltzmann)
+    
+    return np.exp(log_Z), log_Z
+
+
+def exact_expectation_energy(beta, J, h, n):
+    """
+    Compute exact expectation of energy: ⟨E⟩ = -∂log(Z)/∂β
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength  
+    h : float
+        External field
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    E_mean : float
+        Expectation value of energy
+    """
+    n = int(n)
+    M_values = np.arange(-n, n + 1, 2)
+    energies = -J * M_values**2 / (2 * n) - h * M_values
+    
+    # Degeneracies
+    log_degeneracies = np.zeros_like(M_values, dtype=float)
+    for i, M in enumerate(M_values):
+        k = (n + M) // 2
+        if 0 <= k <= n:
+            log_degeneracies[i] = np.log(comb(n, k, exact=False))
+        else:
+            log_degeneracies[i] = -np.inf
+    
+    # Boltzmann weights
+    log_boltzmann = -beta * energies + log_degeneracies
+    _, log_Z = partition_function_exact(beta, J, h, n)
+    
+    # Probabilities
+    log_probs = log_boltzmann - log_Z
+    probs = np.exp(log_probs)
+    
+    # Expectation
+    E_mean = np.sum(probs * energies)
+    
+    return E_mean
+
+
+def exact_expectation_magnetization(beta, J, h, n):
+    """
+    Compute exact expectation of magnetization per spin: ⟨m⟩ = ⟨M⟩/n
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    m_mean : float
+        Expectation value of magnetization per spin
+    """
+    n = int(n)
+    M_values = np.arange(-n, n + 1, 2)
+    
+    # Degeneracies
+    log_degeneracies = np.zeros_like(M_values, dtype=float)
+    for i, M in enumerate(M_values):
+        k = (n + M) // 2
+        if 0 <= k <= n:
+            log_degeneracies[i] = np.log(comb(n, k, exact=False))
+        else:
+            log_degeneracies[i] = -np.inf
+    
+    # Energies
+    energies = -J * M_values**2 / (2 * n) - h * M_values
+    
+    # Boltzmann weights
+    log_boltzmann = -beta * energies + log_degeneracies
+    _, log_Z = partition_function_exact(beta, J, h, n)
+    
+    # Probabilities
+    log_probs = log_boltzmann - log_Z
+    probs = np.exp(log_probs)
+    
+    # Expectation
+    M_mean = np.sum(probs * M_values)
+    m_mean = M_mean / n
+    
+    return m_mean
+
+
+def exact_joint_entropy_canonical(beta, J, h, n):
+    """
+    Compute exact canonical joint entropy: H = log(Z) + β⟨E⟩
+    
+    This is the Shannon entropy of the full joint distribution p(x₁,...,xₙ).
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    H : float
+        Joint entropy (total, not per spin)
+    """
+    _, log_Z = partition_function_exact(beta, J, h, n)
+    E_mean = exact_expectation_energy(beta, J, h, n)
+    
+    H = log_Z + beta * E_mean
+    
+    return H
+
+
+def exact_marginal_entropy_canonical(beta, J, h, n):
+    """
+    Compute exact marginal entropy by marginalizing the full distribution.
+    
+    For each spin i, we compute p(xᵢ = +1) by summing over all configurations
+    with xᵢ = +1, weighted by Boltzmann factors. Due to symmetry in Curie-Weiss,
+    all spins have the same marginal, so we only need to compute it once.
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    h_marginal : float
+        Marginal entropy of a single spin
+    """
+    # Due to symmetry, all spins have identical marginals
+    # p(x₁ = +1) = ⟨(1 + x₁)/2⟩ = (1 + ⟨m⟩)/2
+    m_mean = exact_expectation_magnetization(beta, J, h, n)
+    
+    # Binary entropy
+    h_marginal = marginal_entropy(m_mean, n=1.0)
+    
+    return h_marginal
+
+
+def exact_multi_information_canonical(beta, J, h, n):
+    """
+    Compute exact multi-information: I = Σᵢ h(Xᵢ) - H(X₁,...,Xₙ)
+    
+    This measures the total correlation in the system.
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    I : float
+        Multi-information (total correlation)
+    """
+    H_joint = exact_joint_entropy_canonical(beta, J, h, n)
+    h_marginal = exact_marginal_entropy_canonical(beta, J, h, n)
+    
+    I = n * h_marginal - H_joint
+    
+    return I
+
+
 
 def joint_entropy_curie_weiss(beta, J, m, n=1.0):
     """
-    Joint entropy H for N-spin Curie-Weiss model (per spin).
+    Joint entropy H for N-spin Curie-Weiss model at fixed magnetization m.
     
-    In mean field: H ≈ h(m) - β²J²m²/2 (fluctuations)
+    Uses mean-field approximation: H ≈ h(m) - β²J²m²/2 (Gaussian fluctuations)
+    
+    This approximation captures the temperature-dependent correlations that
+    are relevant for testing the energy-entropy equivalence theorem.
     """
+    # Mean-field approximation
     h_m = marginal_entropy(m, n)
     I = multi_information_curie_weiss(beta, J, m, n)
     return h_m - I
@@ -135,9 +452,11 @@ def joint_entropy_curie_weiss(beta, J, m, n=1.0):
 
 def multi_information_curie_weiss(beta, J, m, n=1.0):
     """
-    Multi-information I = N*h(m) - H
+    Multi-information I = Σh_i(m) - H
     
-    For Curie-Weiss: I ≈ β²J²nm² (correlations scale with system size)
+    For Curie-Weiss mean-field: I ≈ β²J²nm²/(1-βJ) (Gaussian fluctuations)
+    
+    This captures the temperature-dependent correlations that grow as T → T_c.
     """
     # Correlation correction (Gaussian fluctuations)
     correlation_term = n*(beta * J * m)**2 / 2
@@ -171,7 +490,6 @@ def gradient_joint_entropy_wrt_m(beta, J, m, n=1.0):
     # Direct term from h(m)
     grad_h = gradient_marginal_entropy_wrt_m(m, n)
     grad_I = gradient_multi_info_wrt_m(beta, J, m, n)
-    
     return grad_h - grad_I
 
 
@@ -187,6 +505,38 @@ def gradient_multi_info_wrt_m(beta, J, m, n=1.0):
         return n*beta**2 * J**2 * m / threshold  # Enhanced near criticality
     else:
         return n*beta**2 * J**2 * m / (1 - beta * J)
+
+
+def constraint_gradient_angle(beta, J, m, n=1.0):
+    """
+    Compute relative misalignment between constraint gradients.
+    
+    The theorem states: ∇(Σh_i) = ∇H + ∇I
+    
+    When ∇I ≈ 0, we have ∇(Σh_i) ≈ ∇H ∝ ∇E (equivalence holds)
+    
+    We measure the "angle" as the relative contribution of ∇I:
+        θ = arctan(|∇I| / |∇H|)
+    
+    This is dimensionless and captures when correlations break equivalence.
+    """
+    grad_H = gradient_joint_entropy_wrt_m(beta, J, m, n)
+    grad_I = gradient_multi_info_wrt_m(beta, J, m, n)
+    
+    norm_H = abs(grad_H)
+    norm_I = abs(grad_I)
+    
+    if norm_H < 1e-10:
+        return 0.0
+    
+    # Return relative magnitude as a "pseudo-angle" in degrees
+    # When grad_I << grad_H: angle ≈ 0 (equivalence holds)
+    # When grad_I ~ grad_H: angle ≈ 45 (equivalence breaking)
+    # When grad_I >> grad_H: angle → 90 (equivalence fails)
+    ratio = norm_I / norm_H
+    pseudo_angle = np.arctan(ratio)  # Maps [0,∞) → [0, 90°)
+    
+    return np.degrees(pseudo_angle)
 
 
     

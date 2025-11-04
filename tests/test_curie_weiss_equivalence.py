@@ -71,6 +71,58 @@ class TestGradients:
             grad_neg = cw.gradient_marginal_entropy_wrt_m(-m, n=1.0)
             assert abs(grad_pos + grad_neg) < 1e-10, f"Antisymmetry broken at m={m}"
     
+    def test_gradient_marginal_entropy_no_clipping(self):
+        """Gradient should diverge properly near boundaries without artificial clipping"""
+        import numpy as np
+        
+        # Test that gradient increases (in magnitude) as |m| → 1
+        m_values = [0.9, 0.95, 0.99, 0.995, 0.999, 0.9999, 0.99999, 0.999999]
+        grads = [abs(cw.gradient_marginal_entropy_wrt_m(m, n=1.0)) for m in m_values]
+        
+        # Gradients should be monotonically increasing
+        for i in range(len(grads) - 1):
+            assert grads[i+1] > grads[i], \
+                f"Gradient not increasing: |∇h({m_values[i]})| = {grads[i]}, |∇h({m_values[i+1]})| = {grads[i+1]}"
+        
+        # OLD CODE: clipped at 10.0 for |m| >= 0.99
+        # Test that we can compute proper values beyond the old clipping region
+        # At m=0.99, old code would return 10.0, new code returns ~2.65
+        grad_99 = abs(cw.gradient_marginal_entropy_wrt_m(0.99, n=1.0))
+        assert 2.6 < grad_99 < 2.7, \
+            f"At m=0.99, expected ~2.65 (not clipped 10.0), got {grad_99}"
+        
+        # At m=0.999999999, gradient should exceed 10.0 (the old clipping value)
+        m_large = 0.999999999
+        grad_large = abs(cw.gradient_marginal_entropy_wrt_m(m_large, n=1.0))
+        assert grad_large > 10.0, \
+            f"Gradient at m={m_large} should exceed old clipping value 10.0, got {grad_large}"
+        
+        # Test numerical stability very close to boundary
+        # Should remain finite (but large) for |m| < 1
+        m_extreme = 1.0 - 1e-14
+        grad_extreme = cw.gradient_marginal_entropy_wrt_m(m_extreme, n=1.0)
+        assert np.isfinite(grad_extreme), \
+            f"Gradient should be finite at m={m_extreme}, got {grad_extreme}"
+        assert abs(grad_extreme) > 15.0, \
+            f"Gradient should be large at m={m_extreme}, got {grad_extreme}"
+        
+        # Test that arctanh formula is exact
+        for m in [0.5, 0.9, 0.99, 0.999, 0.9999]:
+            grad_test = cw.gradient_marginal_entropy_wrt_m(m, n=1.0)
+            expected_exact = -np.arctanh(m)
+            assert abs(grad_test - expected_exact) < 1e-14, \
+                f"Gradient at m={m} should be -arctanh({m}) = {expected_exact}, got {grad_test}"
+        
+        # Test at exact boundary: should return ±infinity
+        with np.errstate(divide='ignore'):
+            grad_at_1 = cw.gradient_marginal_entropy_wrt_m(1.0, n=1.0)
+            assert grad_at_1 == -np.inf, \
+                f"Gradient at m=1.0 should be -inf, got {grad_at_1}"
+            
+            grad_at_minus_1 = cw.gradient_marginal_entropy_wrt_m(-1.0, n=1.0)
+            assert grad_at_minus_1 == np.inf, \
+                f"Gradient at m=-1.0 should be +inf, got {grad_at_minus_1}"
+    
 
 
 class TestConstraintAngle:
@@ -286,7 +338,7 @@ class TestExactCanonicalComputation:
         
         h_marginal = cw.exact_marginal_entropy_canonical(beta, J, h, n)
         m_mean = cw.exact_expectation_magnetisation(beta, J, h, n)
-        h_expected = cw.marginal_entropy(m_mean, n=1.0)
+        h_expected = cw.marginal_entropy(m_mean, n=n)  # Total marginal entropy
         
         assert abs(h_marginal - h_expected) < 1e-10, \
             f"Marginal entropy mismatch: {h_marginal} vs {h_expected}"
@@ -302,10 +354,11 @@ class TestExactCanonicalComputation:
         H = cw.exact_joint_entropy_canonical(beta, J, h, n)
         h_marginal = cw.exact_marginal_entropy_canonical(beta, J, h, n)
         
-        I_from_decomp = n * h_marginal - H
+        # h_marginal already contains sum over all spins
+        I_from_decomp = h_marginal - H
         
         assert abs(I - I_from_decomp) < 1e-10, \
-            f"Decomposition failed: I={I}, n*h-H={I_from_decomp}"
+            f"Decomposition failed: I={I}, Σh-H={I_from_decomp}"
 
 
 class TestExactGradients:

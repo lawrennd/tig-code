@@ -415,20 +415,11 @@ def gradient_marginal_entropy_wrt_m(m, n=1.0):
     """
     ∇_m h(m) = -log[(1+m)/(1-m)]/2 = -arctanh(m)
     
-    For numerical stability near |m| → 1, uses the logarithmic form directly:
-        arctanh(m) = 0.5 * (log(1+m) - log(1-m))
-    
-    This avoids clipping and captures the correct divergence as |m| → 1.
+    This properly captures the logarithmic divergence as |m| → 1.
+    np.arctanh is numerically stable for all |m| < 1 (tested to m = 1 - 1e-14).
+    At exactly |m| = 1, returns ±∞ (correct mathematical limit).
     """
-    # Use log form for numerical stability, especially near boundaries
-    # log1p(x) = log(1+x) is more accurate for small x
-    if abs(m) < 0.9999:
-        # Standard form works well in this range
-        return -n * np.arctanh(m)
-    else:
-        # Logarithmic form for stability near ±1
-        # arctanh(m) = 0.5 * (log(1+m) - log(1-m))
-        return -n * 0.5 * (np.log1p(m) - np.log1p(-m))
+    return -n * np.arctanh(m)
 
 
 def exact_gradient_multi_info_wrt_h(beta, J, h, n, dh=1e-6):

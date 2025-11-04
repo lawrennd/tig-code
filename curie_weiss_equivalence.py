@@ -310,7 +310,7 @@ def exact_marginal_entropy_canonical(beta, J, h, n):
     m_mean = exact_expectation_magnetisation(beta, J, h, n)
     
     # Binary entropy
-    h_marginal = marginal_entropy(m_mean, n=1.0)
+    h_marginal = marginal_entropy(m_mean, n)
     
     return h_marginal
 
@@ -373,7 +373,7 @@ def exact_multi_information_canonical(beta, J, h, n):
     H_joint = exact_joint_entropy_canonical(beta, J, h, n)
     h_marginal = exact_marginal_entropy_canonical(beta, J, h, n)
     
-    I = n * h_marginal - H_joint
+    I = h_marginal - H_joint
     
     return I
 

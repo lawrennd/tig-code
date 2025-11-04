@@ -303,13 +303,13 @@ def exact_marginal_entropy_canonical(beta, J, h, n):
     Returns:
     --------
     h_marginal : float
-        Marginal entropy of a single spin
+        Total marginal entropy (sum over all n spins)
     """
     # Due to symmetry, all spins have identical marginals
     # p(x₁ = +1) = ⟨(1 + x₁)/2⟩ = (1 + ⟨m⟩)/2
     m_mean = exact_expectation_magnetisation(beta, J, h, n)
     
-    # Binary entropy
+    # Binary entropy scaled by n for total system
     h_marginal = marginal_entropy(m_mean, n)
     
     return h_marginal
@@ -413,11 +413,22 @@ def gradient_energy_wrt_m(J, h, m, n=1.0):
 
 def gradient_marginal_entropy_wrt_m(m, n=1.0):
     """
-    ∇_m h(m) = -log[(1+m)/(1-m)]/2 = -tanh⁻¹(m)
+    ∇_m h(m) = -log[(1+m)/(1-m)]/2 = -arctanh(m)
+    
+    For numerical stability near |m| → 1, uses the logarithmic form directly:
+        arctanh(m) = 0.5 * (log(1+m) - log(1-m))
+    
+    This avoids clipping and captures the correct divergence as |m| → 1.
     """
-    if abs(m) >= 0.99:
-        return n*np.sign(m) * 10.0  # Large gradient near boundaries
-    return -n*np.arctanh(m)
+    # Use log form for numerical stability, especially near boundaries
+    # log1p(x) = log(1+x) is more accurate for small x
+    if abs(m) < 0.9999:
+        # Standard form works well in this range
+        return -n * np.arctanh(m)
+    else:
+        # Logarithmic form for stability near ±1
+        # arctanh(m) = 0.5 * (log(1+m) - log(1-m))
+        return -n * 0.5 * (np.log1p(m) - np.log1p(-m))
 
 
 def exact_gradient_multi_info_wrt_h(beta, J, h, n, dh=1e-6):

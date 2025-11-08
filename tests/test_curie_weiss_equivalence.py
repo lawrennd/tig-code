@@ -465,6 +465,218 @@ class TestTheoremValidation:
     
 
 
+class TestNumericalStability:
+    """Tests for numerical stability with large n"""
+    
+    def test_log_binom_small_values(self):
+        """Test log_binom against scipy.special.comb for small n"""
+        from scipy.special import comb
+        
+        # Test cases where both methods should work
+        test_cases = [
+            (10, 5),
+            (20, 10),
+            (50, 25),
+            (100, 50),
+        ]
+        
+        for n, k in test_cases:
+            log_binom_result = cw.log_binom(n, k)
+            scipy_result = np.log(comb(n, k, exact=False))
+            
+            # Should agree to high precision
+            assert abs(log_binom_result - scipy_result) < 1e-10, \
+                f"log_binom({n}, {k}) = {log_binom_result} vs scipy {scipy_result}"
+    
+    def test_log_binom_large_values(self):
+        """Test log_binom doesn't overflow for large n"""
+        
+        # These would overflow with np.log(comb(n, k))
+        test_cases = [
+            (1000, 500),
+            (5000, 2500),
+            (10000, 5000),
+        ]
+        
+        for n, k in test_cases:
+            log_binom_result = cw.log_binom(n, k)
+            
+            # Should return a finite value
+            assert np.isfinite(log_binom_result), \
+                f"log_binom({n}, {k}) returned non-finite value: {log_binom_result}"
+            
+            # Should be positive (binomial coefficients are > 1 for these cases)
+            assert log_binom_result > 0, \
+                f"log_binom({n}, {k}) should be positive, got {log_binom_result}"
+    
+    def test_log_binom_edge_cases(self):
+        """Test edge cases for log_binom"""
+        
+        # C(n, 0) = C(n, n) = 1, so log should be 0
+        assert abs(cw.log_binom(100, 0)) < 1e-10, "log C(100, 0) should be 0"
+        assert abs(cw.log_binom(100, 100)) < 1e-10, "log C(100, 100) should be 0"
+        
+        # C(n, 1) = C(n, n-1) = n, so log should be log(n)
+        n = 100
+        assert abs(cw.log_binom(n, 1) - np.log(n)) < 1e-10, \
+            f"log C({n}, 1) should be log({n})"
+        assert abs(cw.log_binom(n, n-1) - np.log(n)) < 1e-10, \
+            f"log C({n}, {n-1}) should be log({n})"
+    
+    def test_partition_function_no_overflow_large_n(self):
+        """Partition function should work without overflow for large n"""
+        
+        J = 1.0
+        h = 0.1
+        beta = 1.0
+        
+        # Test progressively larger n
+        n_values = [100, 500, 1000, 5000]
+        
+        for n in n_values:
+            try:
+                log_Z = cw.partition_function_exact(beta, J, h, n)
+                
+                # Should return finite value
+                assert np.isfinite(log_Z), \
+                    f"log_Z is not finite for n={n}: {log_Z}"
+                
+                # For these parameters, log_Z should scale roughly as n
+                # (since it's dominated by entropy ~ n log 2)
+                assert log_Z > 0, f"log_Z should be positive for n={n}, got {log_Z}"
+                
+            except (OverflowError, RuntimeWarning) as e:
+                pytest.fail(f"Overflow error for n={n}: {e}")
+    
+    def test_magnetization_consistency_large_n(self):
+        """Magnetization should be consistent across different n"""
+        
+        J = 1.0
+        h = 0.2
+        beta = 2.0  # Low temperature
+        
+        # Compute magnetization for different n
+        n_values = [10, 100, 500, 1000]
+        magnetizations = []
+        
+        for n in n_values:
+            m = cw.exact_expectation_magnetisation(beta, J, h, n)
+            magnetizations.append(m)
+            
+            # Should be finite
+            assert np.isfinite(m), f"Magnetization not finite for n={n}: {m}"
+            
+            # Should be in valid range
+            assert abs(m) <= 1.0, f"Magnetization out of bounds for n={n}: {m}"
+        
+        # Magnetization should converge as n increases
+        # Check that large n values are close to each other
+        m_large_1 = magnetizations[-2]  # n=500
+        m_large_2 = magnetizations[-1]  # n=1000
+        
+        # Should differ by less than 1% in thermodynamic limit
+        assert abs(m_large_1 - m_large_2) < 0.01 * abs(m_large_2), \
+            f"Magnetization not converging: m(500)={m_large_1}, m(1000)={m_large_2}"
+    
+    def test_entropy_extensive_large_n(self):
+        """Joint entropy should scale linearly with n (extensive property)"""
+        
+        J = 1.0
+        h = 0.1
+        beta = 1.0
+        
+        # Test that H/n approaches a constant as n increases
+        n_values = [100, 500, 1000]
+        h_per_site = []
+        
+        for n in n_values:
+            H = cw.exact_joint_entropy_canonical(beta, J, h, n)
+            
+            assert np.isfinite(H), f"Entropy not finite for n={n}: {H}"
+            assert H >= 0, f"Entropy negative for n={n}: {H}"
+            
+            h_per_site.append(H / n)
+        
+        # Entropy per site should converge
+        assert abs(h_per_site[-2] - h_per_site[-1]) < 0.01, \
+            f"Entropy per site not converging: {h_per_site}"
+    
+    def test_multi_information_bounded_large_n(self):
+        """Multi-information gradient should remain bounded for large n"""
+        
+        J = 1.0
+        h = 0.1
+        beta = 0.5  # High temperature (Gaussian regime)
+        
+        # Test that multi-information exists and is non-negative for large n
+        n_values = [100, 500, 1000]
+        
+        for n in n_values:
+            I = cw.exact_multi_information_canonical(beta, J, h, n)
+            
+            # Should be finite
+            assert np.isfinite(I), f"Multi-information not finite for n={n}: {I}"
+            
+            # Should be non-negative (information inequality)
+            assert I >= -0.01, f"Multi-information negative for n={n}: {I}"
+    
+    def test_gradient_angle_convergence_large_n(self):
+        """Constraint gradient angle should converge to expected behavior for large n"""
+        
+        J = 1.0
+        h = 0.05
+        beta = 0.5  # High temperature - expect small angle
+        
+        # Test angle computation for large n
+        n_values = [100, 500, 1000]
+        angles = []
+        
+        for n in n_values:
+            try:
+                angle = cw.exact_constraint_gradient_angle(beta, J, h, n)
+                
+                assert np.isfinite(angle), f"Angle not finite for n={n}: {angle}"
+                assert 0 <= angle < 90, f"Angle out of range for n={n}: {angle}"
+                
+                angles.append(angle)
+                
+            except (OverflowError, RuntimeWarning) as e:
+                pytest.fail(f"Error computing angle for n={n}: {e}")
+        
+        # In Gaussian regime, angle should decrease with n
+        # (equivalence improves)
+        assert angles[-1] < angles[0], \
+            f"Angle should decrease with n in Gaussian regime: {angles}"
+    
+    def test_no_runtime_warnings_large_n(self):
+        """Verify no overflow warnings are raised for large n computations"""
+        
+        import warnings
+        
+        J = 1.0
+        h = 0.1
+        beta = 1.0
+        n = 1000
+        
+        # Catch warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            
+            # Run computations that previously caused overflow
+            _ = cw.partition_function_exact(beta, J, h, n)
+            _ = cw.exact_expectation_magnetisation(beta, J, h, n)
+            _ = cw.exact_expectation_energy(beta, J, h, n)
+            _ = cw.exact_joint_entropy_canonical(beta, J, h, n)
+            _ = cw.exact_multi_information_canonical(beta, J, h, n)
+            
+            # Check no overflow warnings
+            overflow_warnings = [warning for warning in w 
+                               if 'overflow' in str(warning.message).lower()]
+            
+            assert len(overflow_warnings) == 0, \
+                f"Overflow warnings raised: {[str(w.message) for w in overflow_warnings]}"
+
+
 if __name__ == "__main__":
     # Run tests
     pytest.main([__file__, "-v"])

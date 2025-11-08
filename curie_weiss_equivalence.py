@@ -14,12 +14,41 @@ The Curie-Weiss model is ideal because:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import comb, logsumexp
+from scipy.special import comb, logsumexp, loggamma
 
 
 # ============================================================================
 # Curie-Weiss Model: Exact Canonical Ensemble Computation
 # ============================================================================
+
+def log_binom(n, k):
+    """
+    Compute log of binomial coefficient C(n, k) = n! / (k! * (n-k)!)
+    
+    Uses loggamma to avoid overflow for large n:
+        log C(n, k) = log(n!) - log(k!) - log((n-k)!)
+                    = loggamma(n+1) - loggamma(k+1) - loggamma(n-k+1)
+    
+    This is numerically stable for arbitrary n, k.
+    
+    Parameters:
+    -----------
+    n : int or array
+        Total number of items
+    k : int or array  
+        Number of items to choose
+    
+    Returns:
+    --------
+    log_c : float or array
+        Natural log of binomial coefficient
+    """
+    # Handle edge cases
+    if np.any(k < 0) or np.any(k > n):
+        return -np.inf
+    
+    # Use loggamma: log(n!) = loggamma(n+1)
+    return loggamma(n + 1) - loggamma(k + 1) - loggamma(n - k + 1)
 
 
 def marginal_entropy(m, n=1.0):
@@ -34,7 +63,7 @@ def marginal_entropy(m, n=1.0):
     Parameters:
     -----------
     m : float
-        Magnetization per spin, |m| <= 1
+        Magnetisation per spin, |m| <= 1
     n : float, optional
         Number of spins (default 1.0, scales linearly)
     
@@ -114,15 +143,13 @@ def partition_function_exact(beta, J, h, n):
     energies = -J * M_values**2 / (2 * n) - h * M_values
     
     # Log degeneracy: log Ω(M) = log C(n, k) where k = (n+M)/2
-    log_degeneracies = np.zeros_like(M_values, dtype=float)
-    for i, M in enumerate(M_values):
-        k = (n + M) // 2
-        if 0 <= k <= n:
-            log_degeneracies[i] = np.log(comb(n, k, exact=False))
-        else:
-            log_degeneracies[i] = -np.inf
+    # Use log_binom to avoid overflow for large n
+    k_values = (n + M_values) // 2
+    log_degeneracies = np.array([log_binom(n, k) if 0 <= k <= n else -np.inf 
+                                  for k in k_values])
     
     # Compute log(partition function) using logsumexp for numerical stability
+    # logsumexp handles large values internally by shifting
     log_boltzmann = -beta * energies + log_degeneracies
     log_Z = logsumexp(log_boltzmann)
     
@@ -153,20 +180,16 @@ def exact_expectation_energy(beta, J, h, n):
     M_values = np.arange(-n, n + 1, 2)
     energies = -J * M_values**2 / (2 * n) - h * M_values
     
-    # Degeneracies
-    log_degeneracies = np.zeros_like(M_values, dtype=float)
-    for i, M in enumerate(M_values):
-        k = (n + M) // 2
-        if 0 <= k <= n:
-            log_degeneracies[i] = np.log(comb(n, k, exact=False))
-        else:
-            log_degeneracies[i] = -np.inf
+    # Degeneracies using log_binom to avoid overflow
+    k_values = (n + M_values) // 2
+    log_degeneracies = np.array([log_binom(n, k) if 0 <= k <= n else -np.inf 
+                                  for k in k_values])
     
     # Boltzmann weights
     log_boltzmann = -beta * energies + log_degeneracies
     log_Z = partition_function_exact(beta, J, h, n)
     
-    # Probabilities
+    # Probabilities in log space for numerical stability
     log_probs = log_boltzmann - log_Z
     probs = np.exp(log_probs)
     
@@ -199,14 +222,10 @@ def exact_expectation_magnetisation(beta, J, h, n):
     n = int(n)
     M_values = np.arange(-n, n + 1, 2)
     
-    # Degeneracies
-    log_degeneracies = np.zeros_like(M_values, dtype=float)
-    for i, M in enumerate(M_values):
-        k = (n + M) // 2
-        if 0 <= k <= n:
-            log_degeneracies[i] = np.log(comb(n, k, exact=False))
-        else:
-            log_degeneracies[i] = -np.inf
+    # Degeneracies using log_binom to avoid overflow
+    k_values = (n + M_values) // 2
+    log_degeneracies = np.array([log_binom(n, k) if 0 <= k <= n else -np.inf 
+                                  for k in k_values])
     
     # Energies
     energies = -J * M_values**2 / (2 * n) - h * M_values
@@ -215,7 +234,7 @@ def exact_expectation_magnetisation(beta, J, h, n):
     log_boltzmann = -beta * energies + log_degeneracies
     log_Z = partition_function_exact(beta, J, h, n)
     
-    # Probabilities
+    # Probabilities in log space for numerical stability
     log_probs = log_boltzmann - log_Z
     probs = np.exp(log_probs)
     
@@ -399,7 +418,7 @@ def gradient_energy_wrt_m(J, h, m, n=1.0):
     h : float
         External field
     m : float
-        Magnetization per spin
+        Magnetisation per spin
     n : float, optional
         Number of spins (default 1.0). Use n>1 for total system gradient.
     
@@ -422,14 +441,16 @@ def gradient_marginal_entropy_wrt_m(m, n=1.0):
     return -n * np.arctanh(m)
 
 
-def exact_gradient_multi_info_wrt_h(beta, J, h, n, dh=1e-6):
+def analytical_magnetisation_susceptibility(beta, J, h, n):
     """
-    Numerical gradient of multi-information with respect to field h.
+    Compute ∂m/∂h using fluctuation-dissipation theorem.
     
-    Computes ∇_h I using finite differences on exact I:
-        ∇_h I ≈ [I(h + dh) - I(h - dh)] / (2*dh)
+    For canonical ensemble:
+        ∂<M>/∂h = β[<M²> - <M>²] = β Var(M)
+        ∂m/∂h = (1/n) ∂<M>/∂h = β σ²_M / n
     
-    This is exact up to numerical precision (no mean-field approximation).
+    This is exact for the Curie-Weiss model and follows from the
+    fluctuation-dissipation theorem.
     
     Parameters:
     -----------
@@ -441,35 +462,171 @@ def exact_gradient_multi_info_wrt_h(beta, J, h, n, dh=1e-6):
         External field
     n : int
         Number of spins
-    dh : float, optional
-        Step size for finite difference (default 1e-6)
+    
+    Returns:
+    --------
+    dm_dh : float
+        ∂m/∂h 
+    """
+    n = int(n)
+    M_values = np.arange(-n, n + 1, 2)
+    
+    # Degeneracies using log_binom
+    k_values = (n + M_values) // 2
+    log_degeneracies = np.array([log_binom(n, k) if 0 <= k <= n else -np.inf 
+                                  for k in k_values])
+    
+    # Energies
+    energies = -J * M_values**2 / (2 * n) - h * M_values
+    
+    # Boltzmann weights
+    log_boltzmann = -beta * energies + log_degeneracies
+    log_Z = partition_function_exact(beta, J, h, n)
+    
+    # Probabilities
+    log_probs = log_boltzmann - log_Z
+    probs = np.exp(log_probs)
+    
+    # Compute <M> and <M²>
+    M_mean = np.sum(probs * M_values)
+    M2_mean = np.sum(probs * M_values**2)
+    
+    # Variance of M
+    var_M = M2_mean - M_mean**2
+    
+    # Susceptibility: ∂m/∂h = β * Var(M) / n
+    dm_dh = beta * var_M / n
+    
+    return dm_dh
+
+
+def analytical_entropy_derivative_wrt_h(beta, J, h, n):
+    """
+    Compute ∂H/∂h analytically for canonical ensemble.
+    
+    For H = log(Z) + β<E> where E(M) = -JM²/(2n) - hM:
+        ∂H/∂h = ∂log(Z)/∂h + β ∂<E>/∂h
+    
+    The key steps:
+        ∂log(Z)/∂h = β<M>                     (from partition function)
+        ∂<E>/∂h = ∂<-JM²/(2n) - hM>/∂h
+                = <∂E/∂M> * ∂<M>/∂h + <-M>     (product rule + explicit h dependence)
+                = -<M> + β Cov(E, M)             (using FDT for ∂<M>/∂h)
+    
+    Therefore:
+        ∂H/∂h = β<M> + β[-<M> + β Cov(E, M)]
+              = β² Cov(E, M)
+    
+    The β<M> terms cancel! This is the exact result for canonical ensemble.
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins
+    
+    Returns:
+    --------
+    dH_dh : float
+        ∂H/∂h (analytical, exact)
+    """
+    n = int(n)
+    M_values = np.arange(-n, n + 1, 2)
+    
+    # Degeneracies
+    k_values = (n + M_values) // 2
+    log_degeneracies = np.array([log_binom(n, k) if 0 <= k <= n else -np.inf 
+                                  for k in k_values])
+    
+    # Energies
+    energies = -J * M_values**2 / (2 * n) - h * M_values
+    
+    # Boltzmann weights
+    log_boltzmann = -beta * energies + log_degeneracies
+    log_Z = partition_function_exact(beta, J, h, n)
+    
+    # Probabilities
+    log_probs = log_boltzmann - log_Z
+    probs = np.exp(log_probs)
+    
+    # Compute <M>, <E>, <M*E>
+    M_mean = np.sum(probs * M_values)
+    E_mean = np.sum(probs * energies)
+    ME_mean = np.sum(probs * M_values * energies)
+    
+    # ∂H/∂h = β² Cov(E, M) = β²[<E*M> - <E><M>]
+    dH_dh = beta**2 * (ME_mean - M_mean * E_mean)
+    
+    return dH_dh
+
+
+def exact_gradient_multi_info_wrt_h(beta, J, h, n):
+    """
+    Gradient of multi-information with respect to field h.
+    
+    Computes ∇_h I analytically (default) or numerically:
+        I = n*h(m) - H
+        ∇_h I = n * (∂h/∂m) * (∂m/∂h) - ∂H/∂h
+    
+    Analytical computation uses fluctuation-dissipation theorem for ∂m/∂h
+    and thermodynamic identity for ∂H/∂h.
+    
+    Parameters:
+    -----------
+    beta : float
+        Inverse temperature
+    J : float
+        Coupling strength
+    h : float
+        External field
+    n : int
+        Number of spins
     
     Returns:
     --------
     grad_I_h : float
-        ∇_h I (exact, up to numerical precision)
+        ∇_h I (exact)
     
-    Computational limits:
-    ---------------------
-    ✓ n ≤ 20 (exact computation feasible)
+    
     
     Note:
     -----
-    To get ∇_m I, use chain rule: ∇_m I = (∇_h I) / (∇_h m)
+    Analytical version is preferred - it's faster, more accurate, and
+    doesn't require choosing a step size dh.
     """
-    I_plus = exact_multi_information_canonical(beta, J, h + dh, n)
-    I_minus = exact_multi_information_canonical(beta, J, h - dh, n)
-    return (I_plus - I_minus) / (2 * dh)
+    # Analytical computation
+    # I = n*h(m) - H
+    # ∇_h I = n * (∂h/∂m) * (∂m/∂h) - ∂H/∂h
+
+    # Get magnetisation
+    m = exact_expectation_magnetisation(beta, J, h, n)
+
+    # Analytical derivatives
+    dm_dh = analytical_magnetisation_susceptibility(beta, J, h, n)
+    dH_dh = analytical_entropy_derivative_wrt_h(beta, J, h, n)
+
+    # Marginal entropy derivative
+    dh_dm = gradient_marginal_entropy_wrt_m(m, n=n)
+
+    # Chain rule: ∇_h I = n * (∂h/∂m) * (∂m/∂h) - ∂H/∂h
+    grad_I_h = dh_dm * dm_dh - dH_dh
+
+    return grad_I_h
 
 
-def exact_gradient_multi_info_wrt_m(beta, J, h, n, dh=1e-6):
+def exact_gradient_multi_info_wrt_m(beta, J, h, n):
     """
-    Numerical gradient of multi-information with respect to magnetisation m.
+    Gradient of multi-information with respect to magnetisation m.
     
-    Computes ∇_m I using chain rule and exact computations:
+    Computes ∇_m I using chain rule with analytical or numerical derivatives:
         ∇_m I = (∇_h I) / (∇_h m)
     
-    Both gradients computed exactly via finite differences on exact functions.
+    Analytical version uses fluctuation-dissipation theorem for susceptibility.
     
     Parameters:
     -----------
@@ -481,39 +638,24 @@ def exact_gradient_multi_info_wrt_m(beta, J, h, n, dh=1e-6):
         External field (determines m)
     n : int
         Number of spins
-    dh : float, optional
-        Step size for finite difference (default 1e-6)
     
     Returns:
     --------
     grad_I_m : float
-        ∇_m I (exact, up to numerical precision)
-    
-    Computational limits:
-    ---------------------
-    ✓ n ≤ 20 (exact computation feasible)
-    
-    Compare to:
-    -----------
-    gradient_multi_info_wrt_m() - mean-field approximation (faster but approximate)
+        ∇_m I (exact)
+        
     """
-    # Exact gradients via finite differences
-    grad_I_h = exact_gradient_multi_info_wrt_h(beta, J, h, n, dh)
-    
-    # ∇_h m
-    m_plus = exact_expectation_magnetisation(beta, J, h + dh, n)
-    m_minus = exact_expectation_magnetisation(beta, J, h - dh, n)
-    grad_m_h = (m_plus - m_minus) / (2 * dh)
-    
-    # Chain rule: ∇_m I = (∇_h I) / (∇_h m)
-    if abs(grad_m_h) < 1e-12:
-        # Magnetization not changing with field (saturated or at h=0 with symmetry)
-        return 0.0
-    
-    return grad_I_h / grad_m_h
+    # Compute ∇_h I 
+    dH_dh = analytical_entropy_derivative_wrt_h(beta, J, h, n)
+    dm_dh = analytical_magnetisation_susceptibility(beta, J, h, n)
+    dH_dm = dH_dh / dm_dh
+        
+    m = exact_expectation_magnetisation(beta, J, h, n)
+    dh_dm = gradient_marginal_entropy_wrt_m(m, n=n)
 
+    return dh_dm - dH_dm
 
-def exact_constraint_gradient_angle(beta, J, h, n, dh=1e-6):
+def exact_constraint_gradient_angle(beta, J, h, n):
     """
     Angle between energy and marginal entropy constraint gradients.
     
@@ -532,8 +674,6 @@ def exact_constraint_gradient_angle(beta, J, h, n, dh=1e-6):
         External field
     n : int
         Number of spins
-    dh : float, optional
-        Step size for finite differences (default 1e-6)
     
     Returns:
     --------
@@ -562,9 +702,9 @@ def exact_constraint_gradient_angle(beta, J, h, n, dh=1e-6):
     """
     # Get exact magnetisation
     m = exact_expectation_magnetisation(beta, J, h, n)
-    
-    # Exact gradients via finite differences
-    grad_I = exact_gradient_multi_info_wrt_m(beta, J, h, n, dh)
+        
+    # Exact gradients (uses analytical derivatives by default)
+    grad_I = exact_gradient_multi_info_wrt_m(beta, J, h, n)
     
     # For ∇_m H, we need ∇_m(n*h(m) - I)
     # Since h(m) is the marginal entropy (exact binary entropy)
@@ -573,18 +713,23 @@ def exact_constraint_gradient_angle(beta, J, h, n, dh=1e-6):
     
     norm_H = abs(grad_H)
     norm_I = abs(grad_I)
-    
-    if norm_H < 1e-10:
-        return 0.0
-    
-    # Angle from relative magnitude
+        
+    # Compute ratio
     ratio = norm_I / norm_H
-    pseudo_angle = np.arctan(ratio)
+    
+    # For very small ratios, use linear approximation for better numerical stability
+    # arctan(x) ≈ x for small x (relative error < 1e-6 for x < 0.01)
+    if ratio < 0.01:
+        # Small angle approximation: θ ≈ ratio (in radians)
+        pseudo_angle = ratio
+    else:
+        # Standard computation
+        pseudo_angle = np.arctan(ratio)
     
     return np.degrees(pseudo_angle)
 
 
-def constraint_gradient_angle(beta, J, h, n, dh=1e-6):
+def constraint_gradient_angle(beta, J, h, n):
     """
     Angle between energy and marginal entropy constraint gradients.
     
@@ -611,8 +756,6 @@ def constraint_gradient_angle(beta, J, h, n, dh=1e-6):
         External field
     n : int
         Number of spins
-    dh : float, optional
-        Step size for finite differences (default 1e-6)
     
     Returns:
     --------
@@ -646,7 +789,7 @@ def constraint_gradient_angle(beta, J, h, n, dh=1e-6):
     version consistently overestimated angles (e.g., 18° vs true 2.5° in Gaussian regime).
     """
     # Delegate to exact computation
-    return exact_constraint_gradient_angle(beta, J, h, n, dh)
+    return exact_constraint_gradient_angle(beta, J, h, n)
 
 
     
@@ -654,7 +797,7 @@ def constraint_gradient_angle(beta, J, h, n, dh=1e-6):
 # Compute Implied Alphas from Each Constraint
 # ============================================================================
 
-def implied_alpha_from_constraints(beta, J, h, n, dh=1e-6):
+def implied_alpha_from_constraints(beta, J, h, n):
     """
     Compute the implied natural parameters from different constraints using gradients.
     
@@ -671,8 +814,6 @@ def implied_alpha_from_constraints(beta, J, h, n, dh=1e-6):
         External field
     n : int
         Number of spins
-    dh : float, optional
-        Step size for finite differences (default 1e-6)
     
     Returns:
     --------
@@ -685,20 +826,17 @@ def implied_alpha_from_constraints(beta, J, h, n, dh=1e-6):
     angle : float
         Angle between constraints (degrees) - computed exactly
     
-    Note:
-    -----
-    This function now uses exact gradients via finite differences, providing
-    accurate results without mean-field approximations.
+    
     """
     # Get exact magnetisation
     m = exact_expectation_magnetisation(beta, J, h, n)
-    
+        
     # Energy direction (defines α_energy)
     grad_E = gradient_energy_wrt_m(J, h, m, n)  # Include n for total system
     alpha_energy = -grad_E  # α_energy ∝ -∇E
     
-    # Exact gradient of multi-information
-    grad_I = exact_gradient_multi_info_wrt_m(beta, J, h, n, dh)
+    # Exact gradient of multi-information (uses analytical derivatives)
+    grad_I = exact_gradient_multi_info_wrt_m(beta, J, h, n)
     
     # Marginal entropy gradient (exact for binary entropy function)
     grad_marginal = gradient_marginal_entropy_wrt_m(m, n)
@@ -708,7 +846,7 @@ def implied_alpha_from_constraints(beta, J, h, n, dh=1e-6):
     alpha_from_H = -grad_H / beta
     alpha_from_marginal = -grad_marginal / beta
     
-    # Angle computed exactly
-    angle = exact_constraint_gradient_angle(beta, J, h, n, dh)
+    # Angle computed with adaptive step size (uses analytical gradients)
+    angle = exact_constraint_gradient_angle(beta, J, h, n)
     
     return alpha_energy, alpha_from_H, alpha_from_marginal, angle

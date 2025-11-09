@@ -702,7 +702,7 @@ def exact_constraint_gradient_angle(beta, J, h, n):
     """
     # Get exact magnetisation
     m = exact_expectation_magnetisation(beta, J, h, n)
-        
+    
     # Exact gradients (uses analytical derivatives by default)
     grad_I = exact_gradient_multi_info_wrt_m(beta, J, h, n)
     
@@ -713,7 +713,7 @@ def exact_constraint_gradient_angle(beta, J, h, n):
     
     norm_H = abs(grad_H)
     norm_I = abs(grad_I)
-        
+    
     # Compute ratio
     ratio = norm_I / norm_H
     
@@ -724,7 +724,7 @@ def exact_constraint_gradient_angle(beta, J, h, n):
         pseudo_angle = ratio
     else:
         # Standard computation
-        pseudo_angle = np.arctan(ratio)
+    pseudo_angle = np.arctan(ratio)
     
     return np.degrees(pseudo_angle)
 
@@ -830,7 +830,7 @@ def implied_alpha_from_constraints(beta, J, h, n):
     """
     # Get exact magnetisation
     m = exact_expectation_magnetisation(beta, J, h, n)
-        
+    
     # Energy direction (defines α_energy)
     grad_E = gradient_energy_wrt_m(J, h, m, n)  # Include n for total system
     alpha_energy = -grad_E  # α_energy ∝ -∇E

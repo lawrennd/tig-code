@@ -13,6 +13,7 @@ Main Functions:
     Core Analysis:
     analyse_generic_structure() - Compute M = S + A decomposition at a point
     analyse_correlation_structure() - Analyse frustration patterns
+    verify_jacobi_identity() - Numerically verify Jacobi identity for A
         compute_joint_entropy_trajectory() - H(X₁,...,Xₙ) along trajectory
         compute_marginal_entropy_trajectory() - Σᵢ H(Xᵢ) along trajectory
         compute_regime_along_trajectory() - ||A||/||S|| along trajectory
@@ -58,6 +59,9 @@ Usage:
     # Analyse at specific point
     >>> result = gd.analyse_generic_structure(theta, N=3)
     >>> gd.save_decomposition_table(result)
+    
+    # Verify Jacobi identity for Poisson structure
+    >>> jacobi_result = gd.verify_jacobi_identity(theta, N=3, verbose=True)
 
 Dependencies:
     numpy, scipy, matplotlib
@@ -525,6 +529,130 @@ def analyse_correlation_structure(theta, N):
         'covariance': corr_matrix,
         'theta_marginal': theta[:N],
         'theta_pairwise': theta[N:],
+    }
+
+
+def verify_jacobi_identity(theta, N, eps_diff=1e-5, verbose=True):
+    """
+    Numerically verify the Jacobi identity for the antisymmetric operator A.
+    
+    The Jacobi identity for a Poisson bracket is:
+        {{f,g},h} + {{g,h},f} + {{h,f},g} = 0
+    
+    where {f,g} = (∇f)^T A (∇g).
+    
+    For coordinate functions θ_i, θ_j, θ_k:
+        - {θ_i, θ_j} = A_ij
+        - {{θ_i, θ_j}, θ_k} = Σ_m (∂A_ij/∂θ_m) A_mk
+    
+    This function tests the Jacobi identity on all triplets of coordinate
+    functions and reports the maximum violation.
+    
+    Parameters
+    ----------
+    theta : array
+        Parameter point at which to evaluate
+    N : int
+        Number of binary variables
+    eps_diff : float
+        Step size for finite differences (default: 1e-5)
+    verbose : bool
+        If True, print detailed statistics
+        
+    Returns
+    -------
+    dict with keys:
+        'max_violation' : float
+            Maximum |{{f,g},h} + {{g,h},f} + {{h,f},g}| over all triplets
+        'mean_violation' : float
+            Mean absolute violation
+        'violations' : ndarray, shape (d, d, d)
+            Full violation tensor
+        'A' : ndarray, shape (d, d)
+            Antisymmetric operator at θ
+        'num_triplets' : int
+            Number of triplets tested
+    """
+    d = N + N*(N-1)//2
+    
+    # Compute A at the base point
+    result = analyse_generic_structure(theta, N, eps_diff=eps_diff)
+    A = result['A']
+    
+    # Compute numerical derivatives ∂A_ij/∂θ_k for all i,j,k
+    # This is a tensor of shape (d, d, d)
+    dA = np.zeros((d, d, d))
+    
+    for k in range(d):
+        theta_plus = theta.copy()
+        theta_plus[k] += eps_diff
+        
+        # Compute A at the perturbed point
+        result_plus = analyse_generic_structure(theta_plus, N, eps_diff=eps_diff)
+        A_plus = result_plus['A']
+        
+        # Finite difference: ∂A/∂θ_k ≈ (A(θ+ε) - A(θ))/ε
+        dA[:, :, k] = (A_plus - A) / eps_diff
+    
+    # Evaluate Jacobi identity for all triplets (i,j,k)
+    violations = np.zeros((d, d, d))
+    
+    for i in range(d):
+        for j in range(d):
+            for k in range(d):
+                # First bracket: {θ_i, θ_j} = A_ij (just a number)
+                # Second bracket: {{θ_i, θ_j}, θ_k} = Σ_m (∂A_ij/∂θ_m) A_mk
+                bracket_ij_k = np.dot(dA[i, j, :], A[:, k])
+                
+                # Similarly for cyclic permutations
+                bracket_jk_i = np.dot(dA[j, k, :], A[:, i])
+                bracket_ki_j = np.dot(dA[k, i, :], A[:, j])
+                
+                # Jacobi identity: sum should be zero
+                jacobi_sum = bracket_ij_k + bracket_jk_i + bracket_ki_j
+                violations[i, j, k] = jacobi_sum
+    
+    max_violation = np.max(np.abs(violations))
+    mean_violation = np.mean(np.abs(violations))
+    
+    if verbose:
+        print("\n" + "="*70)
+        print("JACOBI IDENTITY VERIFICATION")
+        print("="*70)
+        print(f"Parameter dimension: d = {d}")
+        print(f"Number of triplets tested: {d**3}")
+        print(f"\nResults:")
+        print(f"  Maximum violation:  {max_violation:.6e}")
+        print(f"  Mean violation:     {mean_violation:.6e}")
+        print(f"  ||A|| (Frobenius):  {result['norm_A']:.6f}")
+        
+        # Relative violation
+        if result['norm_A'] > 1e-10:
+            rel_violation = max_violation / (result['norm_A']**2)
+            print(f"  Relative violation: {rel_violation:.6e} (scaled by ||A||²)")
+        
+        # Find worst offending triplet
+        worst_idx = np.unravel_index(np.argmax(np.abs(violations)), violations.shape)
+        i_worst, j_worst, k_worst = worst_idx
+        print(f"\nWorst triplet: (θ_{i_worst}, θ_{j_worst}, θ_{k_worst})")
+        print(f"  {{{{θ_{i_worst}, θ_{j_worst}}}, θ_{k_worst}}} = {violations[i_worst, j_worst, k_worst]:.6e}")
+        
+        # Check if it's acceptable
+        if max_violation < 1e-4:
+            print("\n✓ Jacobi identity satisfied (violation < 1e-4)")
+        elif max_violation < 1e-3:
+            print("\n⚠ Jacobi identity approximately satisfied (violation < 1e-3)")
+        else:
+            print("\n✗ Jacobi identity violated (violation > 1e-3)")
+        print("="*70 + "\n")
+    
+    return {
+        'max_violation': max_violation,
+        'mean_violation': mean_violation,
+        'violations': violations,
+        'A': A,
+        'num_triplets': d**3,
+        'eps_diff': eps_diff
     }
 
 

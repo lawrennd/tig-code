@@ -724,7 +724,7 @@ def exact_constraint_gradient_angle(beta, J, h, n):
         pseudo_angle = ratio
     else:
         # Standard computation
-    pseudo_angle = np.arctan(ratio)
+        pseudo_angle = np.arctan(ratio)
     
     return np.degrees(pseudo_angle)
 

@@ -18,7 +18,7 @@ Date: November 2025
 
 import numpy as np
 import pytest
-import generic_decomposition_n3 as gd
+from tig import generic_decomposition_n3 as gd
 
 
 # ============================================================================

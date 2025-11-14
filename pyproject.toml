@@ -1,10 +1,26 @@
 [tool.poetry]
-name = "the-inaccessible-game"
+name = "tig"
 version = "0.1.0"
-description = "Information-theoretic foundations for thermodynamic-like dynamics"
+description = "The Inaccessible Game: Information-theoretic foundations for thermodynamic-like dynamics"
 authors = ["Neil D. Lawrence <lawrennd@gmail.com>"]
 readme = "README.md"
-package-mode = false
+license = "MIT"
+homepage = "https://github.com/lawrennd/tig-code"
+repository = "https://github.com/lawrennd/tig-code"
+keywords = ["information-theory", "thermodynamics", "GENERIC", "entropy", "Fisher-information"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+packages = [{include = "tig"}]
 
 [tool.poetry.dependencies]
 python = "^3.9"

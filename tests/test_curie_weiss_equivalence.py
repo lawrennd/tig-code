@@ -12,7 +12,7 @@ Tests cover:
 
 import numpy as np
 import pytest
-import curie_weiss_equivalence as cw
+from tig import curie_weiss_equivalence as cw
 
 
 class TestEntropyCalculations:

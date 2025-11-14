@@ -6,7 +6,7 @@ Tests all analytical gradients against numerical differentiation.
 
 import numpy as np
 import pytest
-import harmonic_oscillator as ho
+from tig import harmonic_oscillator as ho
 
 
 # Helper functions for testing

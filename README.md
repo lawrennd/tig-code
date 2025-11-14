@@ -8,7 +8,7 @@ Python library for **information-theoretic dynamics** and **GENERIC structure em
 
 > **The Inaccessible Game**  
 > Neil D. Lawrence (2025)  
-> [arXiv:XXXX.XXXXX](https://arxiv.org/abs/XXXX.XXXXX)
+> [arXiv:2511.06795](https://arxiv.org/abs/2511.06795)
 
 ## Overview
 

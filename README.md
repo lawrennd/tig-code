@@ -189,10 +189,10 @@ Tests cover:
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{lawrence2025inaccessible,
+@article{Lawrence-inaccessible25,
   title={The Inaccessible Game},
   author={Lawrence, Neil D.},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
+  journal={arXiv preprint arXiv:2511.06795},
   year={2025}
 }
 ```
@@ -231,8 +231,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Contact
 
 **Neil D. Lawrence**  
-University of Cambridge  
-📧 lawrennd@gmail.com  
+University of Cambridge   
 🌐 [inverseprobability.com](https://inverseprobability.com)
 
 ## Acknowledgments

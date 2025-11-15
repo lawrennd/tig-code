@@ -1,6 +1,7 @@
 # The Inaccessible Game (TIG)
 
 [![Tests](https://github.com/lawrennd/tig-code/workflows/Tests/badge.svg)](https://github.com/lawrennd/tig-code/actions)
+[![Notebook Tests](https://github.com/lawrennd/tig-code/workflows/Test%20Notebooks/badge.svg)](https://github.com/lawrennd/tig-code/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 

@@ -40,7 +40,7 @@ jobs:
     
     - name: Upload notebook outputs (on failure)
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: notebook-outputs
         path: examples/*.ipynb

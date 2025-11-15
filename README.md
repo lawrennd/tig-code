@@ -107,21 +107,57 @@ print(f"Jacobi identity violation: {jacobi_max:.2e}")
 
 ## Examples
 
-The `examples/` directory contains Jupyter notebooks reproducing all paper figures:
+The `examples/` directory contains Jupyter notebooks reproducing all paper figures and demonstrating key concepts:
 
-- **`generate_all_paper_figures.ipynb`** - Single notebook to regenerate all figures
-- **`simulation_experiments_inaccessible_game.ipynb`** - N=3 binary system experiments
-- **`curie_weiss_experiments_inaccessible_game.ipynb`** - Curie-Weiss model validation
+### Quick Start: All Paper Figures
 
-Run them locally:
+**`generate_all_paper_figures.ipynb`** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lawrennd/tig-code/blob/main/examples/generate_all_paper_figures.ipynb)
+
+Single notebook generating all figures from the paper:
+- **N=3 Binary System** (Section 4.3): GENERIC component norms vs temperature, parameter trajectories, constrained vs unconstrained dynamics
+- **Curie-Weiss Model** (Section 5.2): Magnetization phase transition, multi-information gradient scaling with system size
+
+### Detailed Explorations
+
+**`simulation_experiments_inaccessible_game.ipynb`** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lawrennd/tig-code/blob/main/examples/simulation_experiments_inaccessible_game.ipynb)
+
+Computational validation of GENERIC structure for three binary variables (Ising model):
+- Temperature dependence of ||A||/||S|| ratio (frustrated systems)
+- Constraint maintenance during evolution (Σᵢhᵢ = C preserved)
+- Trajectory comparison: constrained vs unconstrained maximum entropy
+- Marginal and joint entropy evolution
+- **Jacobi identity verification**: Numerical tests across symmetric, asymmetric, and frustrated parameter regimes
+
+**`curie_weiss_experiments_inaccessible_game.ipynb`** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lawrennd/tig-code/blob/main/examples/curie_weiss_experiments_inaccessible_game.ipynb)
+
+Analytical verification using mean-field ferromagnetism:
+- Phase transition at critical temperature βc = 1/J
+- Magnetization scaling with system size across transition
+- Multi-information gradient remains O(1) as n→∞ (intensive behavior)
+- Energy-entropy equivalence theorem validation
+- Constraint gradient angles and alignment
+
+**`mass-spring-simulation-example.ipynb`** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lawrennd/tig-code/blob/main/examples/mass-spring-simulation-example.ipynb)
+
+Harmonic oscillator GENERIC dynamics (Section 6.2):
+- Thermalisation from non-equilibrium initial states
+- Constraint preservation: h(X) + h(P) = constant
+- Distribution evolution in natural parameter space (θ_xx, θ_pp, θ_xp)
+- Particle trajectories under time-varying distributions
+- Equipartition approach and variance trade-offs
+- Ensemble measurements of energy redistribution
+
+### Running Locally
 
 ```bash
+# Install with examples dependencies
+pip install -e .
+
+# Launch notebook
 jupyter notebook examples/generate_all_paper_figures.ipynb
 ```
 
-Or open in Google Colab (no installation needed):
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lawrennd/tig-code/blob/main/examples/generate_all_paper_figures.ipynb)
+All notebooks are **Colab-ready**: they automatically install the `tig` package from GitHub when run in Google Colab (no local installation needed).
 
 ## Testing
 
@@ -189,10 +225,10 @@ Tests cover:
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{Lawrence-inaccessible25,
+@article{lawrence2025inaccessible,
   title={The Inaccessible Game},
   author={Lawrence, Neil D.},
-  journal={arXiv preprint arXiv:2511.06795},
+  journal={arXiv preprint arXiv:XXXX.XXXXX},
   year={2025}
 }
 ```
@@ -231,7 +267,8 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Contact
 
 **Neil D. Lawrence**  
-University of Cambridge   
+University of Cambridge  
+📧 lawrennd@gmail.com  
 🌐 [inverseprobability.com](https://inverseprobability.com)
 
 ## Acknowledgments
@@ -243,4 +280,5 @@ This work builds on foundational contributions from:
 - Curie (1895) & Weiss (1907) - Ferromagnetism theory
 
 See paper for complete references.
+
 

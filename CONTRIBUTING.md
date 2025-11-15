@@ -70,7 +70,48 @@ Check coverage:
 pytest tests/ --cov=tig --cov-report=term
 ```
 
-### 4. Update Documentation
+### 4. Working with Notebooks
+
+If you're contributing example notebooks or modifying existing ones:
+
+**First-time setup**: Install and configure `nbstripout` to automatically clean notebook outputs before committing:
+
+```bash
+poetry install --with dev  # or: pip install nbstripout
+poetry run nbstripout --install  # or: nbstripout --install
+```
+
+This creates a git filter that automatically strips outputs, execution counts, and metadata from notebooks when you commit, preventing:
+- Large binary data (images, plots) from bloating the repository
+- Merge conflicts from execution counts and timestamps
+- Accidentally committing sensitive data in outputs
+
+**Manual stripping**: To manually strip outputs from notebooks:
+
+```bash
+poetry run nbstripout examples/*.ipynb
+# or for specific files:
+poetry run nbstripout examples/my_notebook.ipynb
+```
+
+**Testing notebooks**: Before submitting, ensure your notebook runs cleanly:
+
+```bash
+# Quick smoke test (first N cells only)
+pytest tests/test_notebooks.py -v -k "your_notebook"
+
+# Full execution test (slow)
+pytest tests/test_notebooks.py -v -m slow -k "your_notebook"
+```
+
+**Best practices**:
+- Clear all outputs before committing (nbstripout does this automatically)
+- Test that notebooks run from a fresh kernel
+- Include clear markdown explanations
+- Keep computational cells efficient
+- Add the notebook to `test_notebooks.py` with an appropriate cell limit
+
+### 5. Update Documentation
 
 - Update README.md if adding new features
 - Add docstrings following NumPy style:
@@ -101,7 +142,7 @@ pytest tests/ --cov=tig --cov-report=term
       """
   ```
 
-### 5. Commit Your Changes
+### 6. Commit Your Changes
 
 Write clear, descriptive commit messages:
 
@@ -115,7 +156,7 @@ Detailed explanation of:
 - Any breaking changes or migration notes"
 ```
 
-### 6. Push and Create Pull Request
+### 7. Push and Create Pull Request
 
 ```bash
 git push origin feature/your-feature-name

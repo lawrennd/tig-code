@@ -272,7 +272,14 @@ Contributions welcome! Please:
 2. Create a feature branch (`git checkout -b feature/new-analysis`)
 3. Add tests for new functionality
 4. Ensure all tests pass (`pytest tests/`)
-5. Submit a pull request
+5. **For notebook contributions**: Set up `nbstripout` to auto-clean outputs:
+   ```bash
+   poetry install --with dev
+   poetry run nbstripout --install
+   ```
+6. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 

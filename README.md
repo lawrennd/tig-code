@@ -175,12 +175,25 @@ pytest tests/test_curie_weiss_equivalence.py -v
 pytest tests/test_harmonic_oscillator.py -v
 ```
 
+Run notebook smoke tests (fast, ~2 minutes):
+
+```bash
+pytest tests/test_notebooks.py -v
+```
+
+Run full notebook tests (slow, ~30 minutes):
+
+```bash
+pytest tests/test_notebooks.py -v -m slow
+```
+
 Tests cover:
 - Exponential family computations
 - Entropy calculations (marginal, joint, multi-information)
 - GENERIC decomposition properties (symmetry, antisymmetry, degeneracy conditions)
 - Constraint preservation during dynamics
 - Physical consistency (bounds, conservation laws)
+- **Notebook smoke tests**: Verify imports and setup cells execute correctly
 
 ## API Documentation
 
